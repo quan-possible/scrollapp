@@ -179,3 +179,5 @@ Icon
 !scripts/README.md
 !project.yml
 !Scrollapp.xcodeproj/**
+Scrollapp.xcodeproj/project.xcworkspace/xcuserdata/
+tmp/
