@@ -28,6 +28,8 @@ struct AutoscrollVelocity: Equatable {
 }
 
 struct AutoscrollPhysics {
+    static let `default` = AutoscrollPhysics()
+
     var deadZone: CGFloat = 15.0
     var horizontalScale: CGFloat = 74.0
     var verticalScale: CGFloat = 68.0
@@ -130,19 +132,18 @@ enum AutoscrollTargetBehavior: Equatable {
     case undetermined
 }
 
+struct AutoscrollTargetResolution: Equatable {
+    var behavior: AutoscrollTargetBehavior
+    var fallbackAxes: AutoscrollAxes
+}
+
 struct AutoscrollTargetSnapshot: Equatable {
     var roles: [String]
     var subroles: [String]
     var isExplicitlyScrollable: Bool
     var actions: [String] = []
-    var title: String? = nil
-    var identifier: String? = nil
-    var helpText: String? = nil
-    var valueText: String? = nil
-
-    var primaryRole: String? {
-        roles.first
-    }
+    var actionableAncestorDepth: Int? = nil
+    var linkedAncestorDepth: Int? = nil
 }
 
 enum AutoscrollTargetClassifier {
@@ -194,68 +195,56 @@ enum AutoscrollTargetClassifier {
         "showmenu"
     ]
 
-    static let actionableMetadataTokens: [String] = [
-        "back",
-        "button",
-        "card",
-        "chrome",
-        "close",
-        "forward",
-        "link",
-        "nav",
-        "navigation",
-        "post",
-        "sidebar",
-        "tab",
-        "tabbar",
-        "tabstrip",
-        "thread",
-        "toolbar",
-        "tweet",
-        "workspace"
-    ]
+    static let nearActionableAncestorDepthLimit = 2
+    static let nearInteractiveAncestorDepthLimit = 3
 
-    static func behavior(for snapshot: AutoscrollTargetSnapshot) -> AutoscrollTargetBehavior {
-        if snapshot.roles.contains(where: actionableRoles.contains) {
-            return .passThrough
-        }
-
-        if snapshot.subroles.contains(where: actionableSubroles.contains) {
-            return .passThrough
-        }
-
-        if hasStrongActionableMetadata(snapshot) {
-            return .passThrough
+    static func classify(_ snapshot: AutoscrollTargetSnapshot) -> AutoscrollTargetResolution {
+        if isDirectlyActionable(snapshot) {
+            return AutoscrollTargetResolution(behavior: .passThrough, fallbackAxes: .none)
         }
 
         if snapshot.roles.contains("AXTextField") {
-            return .undetermined
+            return AutoscrollTargetResolution(behavior: .undetermined, fallbackAxes: .none)
         }
 
-        if hasGenericAction(snapshot) {
-            return .undetermined
+        if hasNearInteractiveAncestor(snapshot) {
+            return AutoscrollTargetResolution(behavior: .passThrough, fallbackAxes: .none)
         }
+
+        if hasDirectGenericActionOutsideWebContent(snapshot) {
+            return AutoscrollTargetResolution(behavior: .passThrough, fallbackAxes: .none)
+        }
+
+        let fallbackAxes = inferredFallbackAxes(for: snapshot)
 
         if snapshot.isExplicitlyScrollable {
-            return .startAutoscroll
+            return AutoscrollTargetResolution(behavior: .startAutoscroll, fallbackAxes: fallbackAxes)
         }
 
         if snapshot.roles.contains("AXWebArea") {
-            return .startAutoscroll
+            return AutoscrollTargetResolution(behavior: .startAutoscroll, fallbackAxes: fallbackAxes)
         }
 
         if snapshot.roles.contains(where: strongScrollableRoles.contains) {
-            return .startAutoscroll
+            return AutoscrollTargetResolution(behavior: .startAutoscroll, fallbackAxes: fallbackAxes)
         }
 
-        if snapshot.primaryRole == "AXScrollArea" {
-            return .undetermined
+        if snapshot.roles.first == "AXScrollArea" {
+            return AutoscrollTargetResolution(behavior: .undetermined, fallbackAxes: .none)
         }
 
-        return .undetermined
+        return AutoscrollTargetResolution(behavior: .undetermined, fallbackAxes: .none)
+    }
+
+    static func behavior(for snapshot: AutoscrollTargetSnapshot) -> AutoscrollTargetBehavior {
+        classify(snapshot).behavior
     }
 
     static func fallbackAxes(for snapshot: AutoscrollTargetSnapshot) -> AutoscrollAxes {
+        classify(snapshot).fallbackAxes
+    }
+
+    private static func inferredFallbackAxes(for snapshot: AutoscrollTargetSnapshot) -> AutoscrollAxes {
         if snapshot.roles.contains("AXTextField") {
             return .none
         }
@@ -276,66 +265,62 @@ enum AutoscrollTargetClassifier {
         return !normalizedActions.isDisjoint(with: genericActionNames)
     }
 
-    static func hasStrongActionableMetadata(_ snapshot: AutoscrollTargetSnapshot) -> Bool {
-        guard hasGenericAction(snapshot) else {
+    static func hasNearInteractiveAncestor(_ snapshot: AutoscrollTargetSnapshot) -> Bool {
+        if hasNearActionableAncestor(snapshot.actionableAncestorDepth) {
+            return true
+        }
+
+        if hasNearLinkedAncestor(snapshot.linkedAncestorDepth) {
+            return true
+        }
+
+        return false
+    }
+
+    static func hasDirectGenericActionOutsideWebContent(_ snapshot: AutoscrollTargetSnapshot) -> Bool {
+        guard !snapshot.roles.contains("AXWebArea") else {
             return false
         }
 
-        let metadata = normalizeText([
-            snapshot.title,
-            snapshot.identifier,
-            snapshot.helpText,
-            snapshot.valueText
-        ].compactMap { $0 }.joined(separator: " "))
+        return hasGenericAction(snapshot)
+    }
 
-        guard !metadata.isEmpty else {
+    static func hasNearActionableAncestor(_ depth: Int?) -> Bool {
+        guard let depth else {
             return false
         }
 
-        return actionableMetadataTokens.contains(where: metadata.contains)
+        return depth > 0 && depth <= nearActionableAncestorDepthLimit
+    }
+
+    static func hasNearLinkedAncestor(_ depth: Int?) -> Bool {
+        guard let depth else {
+            return false
+        }
+
+        return depth > 0 && depth <= nearInteractiveAncestorDepthLimit
+    }
+
+    static func isDirectlyActionable(_ snapshot: AutoscrollTargetSnapshot) -> Bool {
+        if let primaryRole = snapshot.roles.first,
+           actionableRoles.contains(primaryRole) {
+            return true
+        }
+
+        if let primarySubrole = snapshot.subroles.first,
+           actionableSubroles.contains(primarySubrole) {
+            return true
+        }
+
+        if snapshot.actionableAncestorDepth == 0 || snapshot.linkedAncestorDepth == 0 {
+            return true
+        }
+
+        return false
     }
 
     static func normalizeToken(_ value: String) -> String {
         value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    }
-
-    static func normalizeText(_ value: String) -> String {
-        let scalars = value.lowercased().unicodeScalars.map { scalar -> Character in
-            CharacterSet.alphanumerics.contains(scalar) ? Character(String(scalar)) : " "
-        }
-        return String(scalars)
-            .split(whereSeparator: \.isWhitespace)
-            .joined(separator: " ")
-    }
-}
-
-struct AutoscrollModeMachine {
-    private(set) var mode: AutoscrollMode = .inactive
-
-    init(mode: AutoscrollMode = .inactive) {
-        self.mode = mode
-    }
-
-    mutating func start() {
-        mode = .initial
-    }
-
-    mutating func notePointerOffset(_ pointerOffset: CGSize, physics: AutoscrollPhysics) {
-        guard mode == .initial, physics.exceededDeadZone(pointerOffset) else { return }
-        mode = .holding
-    }
-
-    mutating func activationButtonReleased() -> Bool {
-        switch mode {
-        case .initial:
-            mode = .toggled
-            return false
-        case .holding:
-            mode = .inactive
-            return true
-        case .inactive, .toggled:
-            return false
-        }
     }
 }
 
@@ -362,8 +347,8 @@ enum AutoscrollStopClickPolicy {
 }
 
 enum AutoscrollBehavior {
-    static let activationDeadZone: CGFloat = 15.0
-    private static let defaultPhysics = AutoscrollPhysics()
+    private static let defaultPhysics = AutoscrollPhysics.default
+    static let activationDeadZone: CGFloat = defaultPhysics.deadZone
 
     static func transitionedMode(
         from mode: AutoscrollMode,
@@ -375,13 +360,21 @@ enum AutoscrollBehavior {
             width: currentPoint.x - anchorPoint.x,
             height: currentPoint.y - anchorPoint.y
         )
+        let exceededDeadZone = defaultPhysics.exceededDeadZone(pointerOffset)
 
-        var machine = AutoscrollModeMachine(mode: mode)
-        machine.notePointerOffset(pointerOffset, physics: defaultPhysics)
-        if !activationButtonIsDown {
-            _ = machine.activationButtonReleased()
+        switch mode {
+        case .inactive:
+            return .inactive
+        case .toggled:
+            return .toggled
+        case .holding:
+            return activationButtonIsDown ? .holding : .inactive
+        case .initial:
+            if exceededDeadZone {
+                return activationButtonIsDown ? .holding : .inactive
+            }
+            return activationButtonIsDown ? .initial : .toggled
         }
-        return machine.mode
     }
 
     static func velocity(

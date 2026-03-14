@@ -24,7 +24,22 @@ final class ScrollappUITests: XCTestCase {
     }
 
     @MainActor
-    private func configuredApplication() -> XCUIApplication {
+    func testLaunchSmokeCapturesForegroundScreenshot() throws {
+        let app = configuredApplication()
+        app.launch()
+
+        XCTAssertTrue(
+            waitForRunningState(app),
+            "Expected Scrollapp to launch and stay alive briefly in UI test mode."
+        )
+
+        attachScreenshotIfForeground(app)
+    }
+}
+
+@MainActor
+private extension ScrollappUITests {
+    func configuredApplication() -> XCUIApplication {
         let app = XCUIApplication(bundleIdentifier: "com.fromis9.scrollapp")
         app.launchArguments.append("--scrollapp-test-mode")
         app.launchEnvironment["SCROLLAPP_TEST_MODE"] = "ui-testing"
@@ -32,8 +47,7 @@ final class ScrollappUITests: XCTestCase {
         return app
     }
 
-    @MainActor
-    private func waitForRunningState(_ app: XCUIApplication) -> Bool {
+    func waitForRunningState(_ app: XCUIApplication) -> Bool {
         wait(
             until: { state in
                 state == .runningForeground ||
@@ -44,8 +58,15 @@ final class ScrollappUITests: XCTestCase {
         )
     }
 
-    @MainActor
-    private func wait(
+    func attachScreenshotIfForeground(_ app: XCUIApplication) {
+        guard app.state == .runningForeground else { return }
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Launch"
+        attachment.lifetime = .deleteOnSuccess
+        add(attachment)
+    }
+
+    func wait(
         until predicate: (XCUIApplication.State) -> Bool,
         for app: XCUIApplication,
         timeout: TimeInterval

@@ -10,10 +10,7 @@
 		0F665165958EE80265FD0430 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = EBC9151011FC4CD91CF3E711 /* Assets.xcassets */; };
 		19300751559A2A6FAEB47FB0 /* AutoscrollCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C57407801712A9C898F3553B /* AutoscrollCore.swift */; };
 		5663913C070F2CBC7312EE64 /* ScrollappApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89BA4CF96A84D88819C021A0 /* ScrollappApp.swift */; };
-		CBACD5ADEB50A2E66FEF3839 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C25F44BEF7AA1B1AC3875DC /* ContentView.swift */; };
 		D158F60905471A35E3660CF5 /* ScrollappUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61D55CAC6CEE5EEF6A2A3C54 /* ScrollappUITests.swift */; };
-		D4B74352C84D93BAFDBB85CD /* ScrollappTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 582B281CF146979851F00E05 /* ScrollappTests.swift */; };
-		D97169448F0DE5B9750A6F5F /* ScrollappUITestsLaunchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8992A776D1DD3D0B79434F42 /* ScrollappUITestsLaunchTests.swift */; };
 		F85883745EE5A343346BC6CC /* AutoscrollCoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D048CB4BA4692926CC900AA /* AutoscrollCoreTests.swift */; };
 /* End PBXBuildFile section */
 
@@ -36,11 +33,8 @@
 
 /* Begin PBXFileReference section */
 		0D048CB4BA4692926CC900AA /* AutoscrollCoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoscrollCoreTests.swift; sourceTree = "<group>"; };
-		582B281CF146979851F00E05 /* ScrollappTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollappTests.swift; sourceTree = "<group>"; };
 		61D55CAC6CEE5EEF6A2A3C54 /* ScrollappUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollappUITests.swift; sourceTree = "<group>"; };
-		8992A776D1DD3D0B79434F42 /* ScrollappUITestsLaunchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollappUITestsLaunchTests.swift; sourceTree = "<group>"; };
 		89BA4CF96A84D88819C021A0 /* ScrollappApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollappApp.swift; sourceTree = "<group>"; };
-		8C25F44BEF7AA1B1AC3875DC /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		AB28BC9482BDAB162FE158F1 /* Scrollapp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Scrollapp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C57407801712A9C898F3553B /* AutoscrollCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoscrollCore.swift; sourceTree = "<group>"; };
 		D0CA227061370B62FEA3411A /* ScrollappUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ScrollappUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -53,7 +47,6 @@
 			isa = PBXGroup;
 			children = (
 				0D048CB4BA4692926CC900AA /* AutoscrollCoreTests.swift */,
-				582B281CF146979851F00E05 /* ScrollappTests.swift */,
 			);
 			path = ScrollappTests;
 			sourceTree = "<group>";
@@ -62,7 +55,6 @@
 			isa = PBXGroup;
 			children = (
 				61D55CAC6CEE5EEF6A2A3C54 /* ScrollappUITests.swift */,
-				8992A776D1DD3D0B79434F42 /* ScrollappUITestsLaunchTests.swift */,
 			);
 			path = ScrollappUITests;
 			sourceTree = "<group>";
@@ -72,7 +64,6 @@
 			children = (
 				EBC9151011FC4CD91CF3E711 /* Assets.xcassets */,
 				C57407801712A9C898F3553B /* AutoscrollCore.swift */,
-				8C25F44BEF7AA1B1AC3875DC /* ContentView.swift */,
 				89BA4CF96A84D88819C021A0 /* ScrollappApp.swift */,
 			);
 			path = Scrollapp;
@@ -258,7 +249,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				D158F60905471A35E3660CF5 /* ScrollappUITests.swift in Sources */,
-				D97169448F0DE5B9750A6F5F /* ScrollappUITestsLaunchTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -267,7 +257,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				19300751559A2A6FAEB47FB0 /* AutoscrollCore.swift in Sources */,
-				CBACD5ADEB50A2E66FEF3839 /* ContentView.swift in Sources */,
 				5663913C070F2CBC7312EE64 /* ScrollappApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -277,7 +266,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				F85883745EE5A343346BC6CC /* AutoscrollCoreTests.swift in Sources */,
-				D4B74352C84D93BAFDBB85CD /* ScrollappTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

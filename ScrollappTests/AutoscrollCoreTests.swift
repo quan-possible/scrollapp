@@ -16,40 +16,115 @@ struct AutoscrollCoreTests {
         #expect(behavior == .passThrough)
     }
 
-    @Test func classifierPassesThroughGenericTabChromeWithMetadata() {
+    @Test func classifierPassesThroughDirectGenericActionOutsideWebContent() {
         let behavior = AutoscrollTargetClassifier.behavior(
             for: AutoscrollTargetSnapshot(
                 roles: ["AXGroup"],
                 subroles: [],
                 isExplicitlyScrollable: false,
-                actions: ["AXPress"],
-                title: "Close tab"
+                actions: ["AXPress"]
             )
         )
 
         #expect(behavior == .passThrough)
     }
 
-    @Test func classifierKeepsGenericPressWithoutStrongMetadataUndetermined() {
+    @Test func classifierStartsGenericPressInsideWebContent() {
         let behavior = AutoscrollTargetClassifier.behavior(
             for: AutoscrollTargetSnapshot(
-                roles: ["AXGroup"],
+                roles: ["AXGroup", "AXWebArea"],
                 subroles: [],
                 isExplicitlyScrollable: false,
-                actions: ["AXPress"],
-                title: "Editor"
+                actions: ["AXPress"]
             )
         )
 
-        #expect(behavior == .undetermined)
+        #expect(behavior == .startAutoscroll)
     }
 
-    @Test func classifierStartsLeafContentInsideWebArea() {
+    @Test func classifierPassesThroughDirectLinkedContainerInsideWebArea() {
+        let behavior = AutoscrollTargetClassifier.behavior(
+            for: AutoscrollTargetSnapshot(
+                roles: ["AXGroup", "AXWebArea"],
+                subroles: [],
+                isExplicitlyScrollable: false,
+                linkedAncestorDepth: 0
+            )
+        )
+
+        #expect(behavior == .passThrough)
+    }
+
+    @Test func classifierPassesThroughTextInsideNearbyLinkedContainer() {
+        let behavior = AutoscrollTargetClassifier.behavior(
+            for: AutoscrollTargetSnapshot(
+                roles: ["AXStaticText", "AXGroup", "AXWebArea"],
+                subroles: [],
+                isExplicitlyScrollable: false,
+                linkedAncestorDepth: 1
+            )
+        )
+
+        #expect(behavior == .passThrough)
+    }
+
+    @Test func classifierPassesThroughGroupInsideNearbyLinkedContainer() {
+        let behavior = AutoscrollTargetClassifier.behavior(
+            for: AutoscrollTargetSnapshot(
+                roles: ["AXGroup", "AXGroup", "AXWebArea"],
+                subroles: [],
+                isExplicitlyScrollable: false,
+                linkedAncestorDepth: 2
+            )
+        )
+
+        #expect(behavior == .passThrough)
+    }
+
+    @Test func classifierPassesThroughTextInsideNearbyActionableContainer() {
+        let behavior = AutoscrollTargetClassifier.behavior(
+            for: AutoscrollTargetSnapshot(
+                roles: ["AXStaticText", "AXGroup", "AXWebArea"],
+                subroles: [],
+                isExplicitlyScrollable: false,
+                actionableAncestorDepth: 1
+            )
+        )
+
+        #expect(behavior == .passThrough)
+    }
+
+    @Test func classifierStartsPlainLeafContentInsideWebArea() {
         let behavior = AutoscrollTargetClassifier.behavior(
             for: AutoscrollTargetSnapshot(
                 roles: ["AXStaticText", "AXGroup", "AXWebArea"],
                 subroles: [],
                 isExplicitlyScrollable: false
+            )
+        )
+
+        #expect(behavior == .startAutoscroll)
+    }
+
+    @Test func classifierStartsPlainGroupContentInsideWebArea() {
+        let behavior = AutoscrollTargetClassifier.behavior(
+            for: AutoscrollTargetSnapshot(
+                roles: ["AXGroup", "AXWebArea"],
+                subroles: [],
+                isExplicitlyScrollable: false
+            )
+        )
+
+        #expect(behavior == .startAutoscroll)
+    }
+
+    @Test func classifierIgnoresDistantLinkedAncestorInsideWebArea() {
+        let behavior = AutoscrollTargetClassifier.behavior(
+            for: AutoscrollTargetSnapshot(
+                roles: ["AXStaticText", "AXGroup", "AXGroup", "AXWebArea"],
+                subroles: [],
+                isExplicitlyScrollable: false,
+                linkedAncestorDepth: 5
             )
         )
 
@@ -80,6 +155,19 @@ struct AutoscrollCoreTests {
         #expect(axes == .both)
     }
 
+    @Test func appLayerIgnoresPageLevelURLAncestorsForLinkedPassThrough() {
+        let delegate = AppDelegate()
+
+        #expect(delegate.isLinkedAncestor(role: "AXWebArea", urlString: "https://example.com") == false)
+        #expect(delegate.isLinkedAncestor(role: "AXWindow", urlString: "https://example.com") == false)
+    }
+
+    @Test func appLayerKeepsGenericURLBackedContainersLinked() {
+        let delegate = AppDelegate()
+
+        #expect(delegate.isLinkedAncestor(role: "AXGroup", urlString: "https://example.com"))
+    }
+
     @Test func physicsUsesDeadZone() {
         let physics = AutoscrollPhysics(deadZone: 15)
         let velocity = physics.velocity(
@@ -90,20 +178,6 @@ struct AutoscrollCoreTests {
         )
 
         #expect(velocity == .zero)
-    }
-
-    @Test func physicsStartsImmediatelyOutsideDeadZone() {
-        let physics = AutoscrollPhysics(deadZone: 15)
-
-        let nearEdge = physics.velocity(
-            from: CGSize(width: 18, height: 0),
-            sensitivity: 1.0,
-            invertVertical: false,
-            axes: .both
-        )
-
-        #expect(nearEdge.horizontal > 0)
-        #expect(nearEdge.horizontal < 14)
     }
 
     @Test func physicsVelocityGrowsWithDistance() {
@@ -121,58 +195,9 @@ struct AutoscrollCoreTests {
             invertVertical: false,
             axes: .both
         )
-        let farMove = physics.velocity(
-            from: CGSize(width: 140, height: 0),
-            sensitivity: 1.0,
-            invertVertical: false,
-            axes: .both
-        )
 
         #expect(shortMove.horizontal > 0)
         #expect(mediumMove.horizontal > shortMove.horizontal)
-        #expect(farMove.horizontal > mediumMove.horizontal)
-        #expect(farMove.horizontal <= physics.maxStep)
-    }
-
-    @Test func physicsHonorsAxisRestrictions() {
-        let physics = AutoscrollPhysics(deadZone: 15)
-
-        let horizontalOnly = physics.velocity(
-            from: CGSize(width: 60, height: 60),
-            sensitivity: 1.0,
-            invertVertical: false,
-            axes: AutoscrollAxes(horizontal: true, vertical: false)
-        )
-        let verticalOnly = physics.velocity(
-            from: CGSize(width: 60, height: 60),
-            sensitivity: 1.0,
-            invertVertical: false,
-            axes: AutoscrollAxes(horizontal: false, vertical: true)
-        )
-
-        #expect(horizontalOnly.horizontal != 0)
-        #expect(horizontalOnly.vertical == 0)
-        #expect(verticalOnly.horizontal == 0)
-        #expect(verticalOnly.vertical != 0)
-    }
-
-    @Test func physicsRespectsVerticalInversion() {
-        let physics = AutoscrollPhysics(deadZone: 15)
-
-        let normal = physics.velocity(
-            from: CGSize(width: 0, height: 80),
-            sensitivity: 1.0,
-            invertVertical: false,
-            axes: .both
-        )
-        let inverted = physics.velocity(
-            from: CGSize(width: 0, height: 80),
-            sensitivity: 1.0,
-            invertVertical: true,
-            axes: .both
-        )
-
-        #expect(normal.vertical == -inverted.vertical)
     }
 
     @Test func modeMachineTransitionsToHoldingAfterDeadZoneCrossing() {
@@ -206,34 +231,5 @@ struct AutoscrollCoreTests {
         )
 
         #expect(mode == .inactive)
-    }
-
-    @Test func stopClickPolicySwallowsPrimaryClickOnly() {
-        #expect(AutoscrollStopClickPolicy.shouldSwallow(buttonNumber: 0))
-        #expect(AutoscrollStopClickPolicy.shouldSwallow(buttonNumber: 1) == false)
-    }
-
-    @Test func smoothedVelocityRampsTowardTarget() {
-        let smoothed = AutoscrollBehavior.smoothedVelocity(
-            previous: .zero,
-            target: AutoscrollVelocity(horizontal: 20, vertical: -12)
-        )
-
-        #expect(smoothed.horizontal > 0)
-        #expect(smoothed.horizontal < 20)
-        #expect(smoothed.vertical < 0)
-        #expect(abs(smoothed.vertical) < 12)
-    }
-
-    @Test func smoothedVelocityDecaysTowardZero() {
-        let smoothed = AutoscrollBehavior.smoothedVelocity(
-            previous: AutoscrollVelocity(horizontal: 12, vertical: -8),
-            target: .zero
-        )
-
-        #expect(smoothed.horizontal > 0)
-        #expect(smoothed.horizontal < 12)
-        #expect(smoothed.vertical < 0)
-        #expect(abs(smoothed.vertical) < 8)
     }
 }

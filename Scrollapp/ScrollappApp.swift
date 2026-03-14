@@ -21,15 +21,14 @@ struct ScrollappApp: App {
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let syntheticScrollUserData: Int64 = 0x5352434C
-    private let physics = AutoscrollPhysics()
 
     var statusItem: NSStatusItem!
     var diagnosticsMenuItems = [RuntimeDiagnosticItem: NSMenuItem]()
+    var diagnosticsState = [RuntimeDiagnosticItem: String]()
     var scrollTimer: Timer?
     var eventTap: CFMachPort?
     var eventTapSource: CFRunLoopSource?
     var indicatorPanel: NSPanel?
-    var indicatorView: AutoscrollIndicatorView?
     var activeSession: AutoscrollSession?
     var activationButtonIsDown = false
     var swallowedButtons = Set<Int>()
@@ -40,29 +39,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var launchAtLogin = false
     var scrollSensitivity: Double = 1.0
     var runtimePermissionStatus = RuntimePermissionStatus()
-    var eventTapStatus = "Event Tap: Inactive"
-    var lastMouseTriggerStatus = "Last Mouse Trigger: Waiting..."
-    var lastActivationMatchStatus = "Activation Match: Waiting..."
-    var lastAXHitTestStatus = "AX Hit-Test: Waiting..."
-    var lastActivationDecisionStatus = "Activation Decision: Waiting..."
-    var lastSessionStateStatus = "Session State: Inactive"
-    var lastScrollEmissionStatus = "Scroll Emission: Waiting..."
-    var lastScrollDeliveryStatus = "Scroll Delivery: Waiting..."
-    var lastStopReasonStatus = "Stop Reason: None"
+    var isStatusMenuOpen = false
+    var diagnosticsRefreshPending = false
 
     struct AccessibilityTargetInfo {
         var pid: pid_t?
         var roles = [String]()
         var subroles = [String]()
         var actionNames = [String]()
-        var titles = [String]()
-        var identifiers = [String]()
-        var helpTexts = [String]()
-        var valueTexts = [String]()
+        var actionableAncestorDepth: Int?
+        var linkedAncestorDepth: Int?
         var actionabilityReasons = [String]()
         var canScrollHorizontally = false
         var canScrollVertically = false
-        var isActionable = false
     }
 
     struct RuntimePermissionStatus {
@@ -143,6 +132,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 return "Scroll Delivery: Waiting..."
             case .stopReason:
                 return "Stop Reason: None"
+            }
+        }
+
+        var titlePrefix: String {
+            switch self {
+            case .accessibility:
+                return "Accessibility"
+            case .listenEvent:
+                return "Input Monitoring"
+            case .postEvent:
+                return "Event Posting"
+            case .eventTap:
+                return "Event Tap"
+            case .lastMouseTrigger:
+                return "Last Mouse Trigger"
+            case .activationMatch:
+                return "Activation Match"
+            case .axHitTest:
+                return "AX Hit-Test"
+            case .activationDecision:
+                return "Activation Decision"
+            case .sessionState:
+                return "Session State"
+            case .scrollEmission:
+                return "Scroll Emission"
+            case .scrollDelivery:
+                return "Scroll Delivery"
+            case .stopReason:
+                return "Stop Reason"
             }
         }
     }
@@ -262,7 +280,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard !isAutomatedTestMode else {
             return
         }
+        isStatusMenuOpen = true
+        diagnosticsRefreshPending = false
+        updateDiagnosticsMenu()
         refreshRuntimeDiagnostics(promptForMissingPermissions: false, retryEventTap: false)
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        isStatusMenuOpen = false
+        diagnosticsRefreshPending = false
     }
 
     func updateDiagnosticsMenu() {
@@ -278,64 +304,81 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             label: "Event Posting",
             isGranted: runtimePermissionStatus.canPostEvents
         )
-        diagnosticsMenuItems[.eventTap]?.title = eventTapStatus
-        diagnosticsMenuItems[.lastMouseTrigger]?.title = lastMouseTriggerStatus
-        diagnosticsMenuItems[.activationMatch]?.title = lastActivationMatchStatus
-        diagnosticsMenuItems[.axHitTest]?.title = lastAXHitTestStatus
-        diagnosticsMenuItems[.activationDecision]?.title = lastActivationDecisionStatus
-        diagnosticsMenuItems[.sessionState]?.title = lastSessionStateStatus
-        diagnosticsMenuItems[.scrollEmission]?.title = lastScrollEmissionStatus
-        diagnosticsMenuItems[.scrollDelivery]?.title = lastScrollDeliveryStatus
-        diagnosticsMenuItems[.stopReason]?.title = lastStopReasonStatus
+        for item in RuntimeDiagnosticItem.allCases
+            where item != .accessibility && item != .listenEvent && item != .postEvent {
+            diagnosticsMenuItems[item]?.title = diagnosticsState[item] ?? item.placeholderTitle
+        }
     }
 
     func statusLine(label: String, isGranted: Bool) -> String {
         "\(label): \(isGranted ? "Granted" : "Missing")"
     }
 
+    func setDiagnostic(_ item: RuntimeDiagnosticItem, description: String) {
+        let value = "\(item.titlePrefix): \(description)"
+        guard diagnosticsState[item] != value else {
+            return
+        }
+        diagnosticsState[item] = value
+        scheduleDiagnosticsMenuRefresh()
+    }
+
     func updateLastMouseTrigger(buttonNumber: Int, location: CGPoint) {
-        lastMouseTriggerStatus = String(
-            format: "Last Mouse Trigger: otherMouseDown button=%d @ (%.0f, %.0f)",
-            buttonNumber,
-            location.x,
-            location.y
+        setDiagnostic(
+            .lastMouseTrigger,
+            description: String(
+                format: "otherMouseDown button=%d @ (%.0f, %.0f)",
+                buttonNumber,
+                location.x,
+                location.y
+            )
         )
-        updateDiagnosticsMenu()
+    }
+
+    func scheduleDiagnosticsMenuRefresh() {
+        guard isStatusMenuOpen, !diagnosticsRefreshPending else {
+            return
+        }
+
+        diagnosticsRefreshPending = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+            guard let self else {
+                return
+            }
+            self.diagnosticsRefreshPending = false
+            guard self.isStatusMenuOpen else {
+                return
+            }
+            self.updateDiagnosticsMenu()
+        }
     }
 
     func updateActivationMatchStatus(_ description: String) {
-        lastActivationMatchStatus = "Activation Match: \(description)"
-        updateDiagnosticsMenu()
+        setDiagnostic(.activationMatch, description: description)
     }
 
     func updateAXHitTestStatus(_ description: String) {
-        lastAXHitTestStatus = "AX Hit-Test: \(description)"
-        updateDiagnosticsMenu()
+        setDiagnostic(.axHitTest, description: description)
     }
 
     func updateActivationDecisionStatus(_ description: String) {
-        lastActivationDecisionStatus = "Activation Decision: \(description)"
-        updateDiagnosticsMenu()
+        setDiagnostic(.activationDecision, description: description)
     }
 
     func updateSessionStateStatus(_ description: String) {
-        lastSessionStateStatus = "Session State: \(description)"
-        updateDiagnosticsMenu()
+        setDiagnostic(.sessionState, description: description)
     }
 
     func updateScrollEmissionStatus(_ description: String) {
-        lastScrollEmissionStatus = "Scroll Emission: \(description)"
-        updateDiagnosticsMenu()
+        setDiagnostic(.scrollEmission, description: description)
     }
 
     func updateScrollDeliveryStatus(_ description: String) {
-        lastScrollDeliveryStatus = "Scroll Delivery: \(description)"
-        updateDiagnosticsMenu()
+        setDiagnostic(.scrollDelivery, description: description)
     }
 
     func updateStopReasonStatus(_ description: String) {
-        lastStopReasonStatus = "Stop Reason: \(description)"
-        updateDiagnosticsMenu()
+        setDiagnostic(.stopReason, description: description)
     }
 
     func summarizeRoles(_ roles: [String]) -> String {
@@ -415,9 +458,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         ) else {
             let missingPermissions = missingPermissionNames(from: runtimePermissionStatus)
             if missingPermissions.isEmpty {
-                eventTapStatus = "Event Tap: Unavailable"
+                diagnosticsState[.eventTap] = "Event Tap: Unavailable"
             } else {
-                eventTapStatus = "Event Tap: Unavailable (\(missingPermissions.joined(separator: ", ")))"
+                diagnosticsState[.eventTap] = "Event Tap: Unavailable (\(missingPermissions.joined(separator: ", ")))"
             }
             updateDiagnosticsMenu()
             return
@@ -430,7 +473,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         }
         CGEvent.tapEnable(tap: tap, enable: true)
-        eventTapStatus = "Event Tap: Active"
+        diagnosticsState[.eventTap] = "Event Tap: Active"
         updateDiagnosticsMenu()
     }
 
@@ -443,7 +486,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         eventTapSource = nil
         eventTap = nil
-        eventTapStatus = "Event Tap: Inactive"
+        diagnosticsState[.eventTap] = "Event Tap: Inactive"
         updateDiagnosticsMenu()
     }
 
@@ -451,7 +494,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             if let tap = eventTap {
                 CGEvent.tapEnable(tap: tap, enable: true)
-                eventTapStatus = "Event Tap: Active"
+                diagnosticsState[.eventTap] = "Event Tap: Active"
                 updateDiagnosticsMenu()
             }
             return Unmanaged.passUnretained(event)
@@ -611,22 +654,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return .passThrough
         }
 
+        let snapshot = targetSnapshot(for: info)
         updateAXHitTestStatus(
-            "\(summarizeRoles(info.roles)) [H:\(info.canScrollHorizontally ? "Y" : "N") V:\(info.canScrollVertically ? "Y" : "N")\(info.isActionable ? " actionable" : "")\(summarizeActionability(info.actionabilityReasons))]"
+            "\(summarizeRoles(info.roles)) [H:\(info.canScrollHorizontally ? "Y" : "N") V:\(info.canScrollVertically ? "Y" : "N")\(!info.actionabilityReasons.isEmpty ? " actionable" : "")\(summarizeActionability(info.actionabilityReasons))]"
         )
 
-        let targetBehavior = AutoscrollTargetClassifier.behavior(
-            for: AutoscrollTargetSnapshot(
-                roles: info.roles,
-                subroles: info.subroles,
-                isExplicitlyScrollable: info.canScrollHorizontally || info.canScrollVertically,
-                actions: info.actionNames,
-                title: joinedMetadata(info.titles),
-                identifier: joinedMetadata(info.identifiers),
-                helpText: joinedMetadata(info.helpTexts),
-                valueText: joinedMetadata(info.valueTexts)
-            )
-        )
+        let targetBehavior = AutoscrollTargetClassifier.behavior(for: snapshot)
 
         if targetBehavior == .passThrough {
             updateActivationDecisionStatus("pass through (classifier)")
@@ -638,7 +671,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return .passThrough
         }
 
-        let fallbackAxes = preferredAxesFallback(for: info)
+        let fallbackAxes = AutoscrollTargetClassifier.fallbackAxes(for: snapshot)
         let canScrollHorizontally = info.canScrollHorizontally || fallbackAxes.horizontal
         let canScrollVertically = info.canScrollVertically || fallbackAxes.vertical
 
@@ -686,7 +719,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateStopReasonStatus("None")
         updateIndicator(for: session)
 
-        scrollTimer = Timer.scheduledTimer(withTimeInterval: 0.01, repeats: true) { [weak self] _ in
+        scrollTimer = Timer.scheduledTimer(withTimeInterval: (1.0 / 60.0), repeats: true) { [weak self] _ in
             self?.performScroll()
         }
         RunLoop.current.add(scrollTimer!, forMode: .common)
@@ -725,36 +758,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             previous: session.velocity,
             target: targetVelocity
         )
-        updateSessionStateStatus(
-            String(
-                format: "mode=%@ buttonDown=%@ dx=%.0f dy=%.0f",
-                String(describing: session.mode) as NSString,
-                activationButtonIsDown ? "Y" : "N",
-                currentPoint.x - session.anchorPoint.x,
-                currentPoint.y - session.anchorPoint.y
+        if isStatusMenuOpen {
+            updateSessionStateStatus(
+                String(
+                    format: "mode=%@ buttonDown=%@ dx=%.0f dy=%.0f",
+                    String(describing: session.mode) as NSString,
+                    activationButtonIsDown ? "Y" : "N",
+                    currentPoint.x - session.anchorPoint.x,
+                    currentPoint.y - session.anchorPoint.y
+                )
             )
-        )
-        updateScrollEmissionStatus(
-            String(
-                format: "mode=%@ vx=%.1f vy=%.1f",
-                String(describing: session.mode) as NSString,
-                session.velocity.horizontal,
-                session.velocity.vertical
+            updateScrollEmissionStatus(
+                String(
+                    format: "mode=%@ vx=%.1f vy=%.1f",
+                    String(describing: session.mode) as NSString,
+                    session.velocity.horizontal,
+                    session.velocity.vertical
+                )
             )
-        )
+        }
 
         activeSession = session
         updateIndicator(for: session)
 
         guard AutoscrollBehavior.shouldEmitScroll(session.velocity) else {
-            updateScrollDeliveryStatus("idle (inside dead zone)")
+            if isStatusMenuOpen {
+                updateScrollDeliveryStatus("idle (inside dead zone)")
+            }
             return
         }
 
         let horizontalAmount = session.canScrollHorizontally ? Int32(session.velocity.horizontal.rounded()) : 0
         let verticalAmount = session.canScrollVertically ? Int32(session.velocity.vertical.rounded()) : 0
         guard horizontalAmount != 0 || verticalAmount != 0 else {
-            updateScrollDeliveryStatus("idle (rounded to zero)")
+            if isStatusMenuOpen {
+                updateScrollDeliveryStatus("idle (rounded to zero)")
+            }
             return
         }
 
@@ -851,19 +890,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let view = AutoscrollIndicatorView(frame: NSRect(origin: .zero, size: size))
             panel.contentView = view
             indicatorPanel = panel
-            indicatorView = view
             panel.orderFront(nil)
         }
     }
 
     func hideIndicator() {
         indicatorPanel?.orderOut(nil)
-        indicatorView = nil
         indicatorPanel = nil
-    }
-
-    func currentEventLocation() -> CGPoint {
-        NSEvent.mouseLocation
     }
 
     func notePhysicalPointerLocationIfNeeded(for type: CGEventType, event: CGEvent) {
@@ -893,10 +926,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         var info = AccessibilityTargetInfo()
         var current: AXUIElement? = hitElement
         var hopCount = 0
+        let ancestryDepthLimit = 12
+        let urlDepthLimit = 3
+        let scrollProbeDepthLimit = 4
 
-        while let element = current, hopCount < 24 {
+        while let element = current, hopCount < ancestryDepthLimit {
             let role = copyAXString(element, attribute: kAXRoleAttribute)
             let subrole = copyAXString(element, attribute: kAXSubroleAttribute)
+            let urlString = hopCount <= urlDepthLimit ? copyAXValueString(element, attribute: "AXURL") : nil
 
             if let role {
                 info.roles.append(role)
@@ -906,61 +943,71 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
 
             let actionNames = copyAXStringArray(element, attribute: "AXActions")
-            if !actionNames.isEmpty {
-                info.actionNames.append(contentsOf: actionNames)
+            if hopCount == 0, !actionNames.isEmpty {
+                info.actionNames = actionNames
             }
 
-            appendMetadata(into: &info.titles, value: copyAXString(element, attribute: kAXTitleAttribute))
-            appendMetadata(into: &info.helpTexts, value: copyAXString(element, attribute: kAXDescriptionAttribute))
-            appendMetadata(into: &info.helpTexts, value: copyAXString(element, attribute: kAXHelpAttribute))
-            appendMetadata(into: &info.identifiers, value: copyAXString(element, attribute: kAXIdentifierAttribute as String))
-            appendMetadata(into: &info.valueTexts, value: copyAXString(element, attribute: kAXValueAttribute))
+            if info.actionableAncestorDepth == nil,
+               isActionableAncestor(
+                role: role,
+                subrole: subrole,
+                actionNames: actionNames
+               ) {
+                info.actionableAncestorDepth = hopCount
+                if hopCount > 0 {
+                    info.actionabilityReasons.append("ancestor")
+                }
+            }
+            if info.linkedAncestorDepth == nil,
+               isLinkedAncestor(role: role, urlString: urlString) {
+                info.linkedAncestorDepth = hopCount
+            }
 
             if let pid = copyPID(for: element) {
                 info.pid = pid
             }
-            if copyAXElement(element, attribute: kAXHorizontalScrollBarAttribute) != nil {
+            if !info.canScrollHorizontally,
+               hopCount <= scrollProbeDepthLimit,
+               copyAXElement(element, attribute: kAXHorizontalScrollBarAttribute) != nil {
                 info.canScrollHorizontally = true
             }
-            if copyAXElement(element, attribute: kAXVerticalScrollBarAttribute) != nil {
+            if !info.canScrollVertically,
+               hopCount <= scrollProbeDepthLimit,
+               copyAXElement(element, attribute: kAXVerticalScrollBarAttribute) != nil {
                 info.canScrollVertically = true
             }
 
-            let actionabilityReasons = actionabilityReasons(
-                role: role,
-                subrole: subrole,
-                actionNames: actionNames,
-                element: element
-            )
-            if !actionabilityReasons.isEmpty {
-                info.actionabilityReasons.append(contentsOf: actionabilityReasons)
-            }
-
-            if isActionable(role: role, subrole: subrole) {
-                info.isActionable = true
+            if hopCount == 0 {
+                let actionabilityReasons = actionabilityReasons(
+                    role: role,
+                    subrole: subrole,
+                    actionNames: actionNames,
+                    urlString: urlString
+                )
+                if !actionabilityReasons.isEmpty {
+                    info.actionabilityReasons.append(contentsOf: actionabilityReasons)
+                }
             }
 
             current = copyAXElement(element, attribute: kAXParentAttribute)
             hopCount += 1
         }
 
+        info.actionabilityReasons = Array(Set(info.actionabilityReasons)).sorted()
+
         return info
     }
 
-    func appendMetadata(into values: inout [String], value: String?) {
-        guard let trimmedValue = value?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !trimmedValue.isEmpty,
-              !values.contains(trimmedValue) else {
-            return
-        }
-        values.append(trimmedValue)
-    }
 
-    func joinedMetadata(_ values: [String]) -> String? {
-        guard !values.isEmpty else {
-            return nil
-        }
-        return values.joined(separator: " ")
+    func targetSnapshot(for info: AccessibilityTargetInfo) -> AutoscrollTargetSnapshot {
+        AutoscrollTargetSnapshot(
+            roles: info.roles,
+            subroles: info.subroles,
+            isExplicitlyScrollable: info.canScrollHorizontally || info.canScrollVertically,
+            actions: info.actionNames,
+            actionableAncestorDepth: info.actionableAncestorDepth,
+            linkedAncestorDepth: info.linkedAncestorDepth
+        )
     }
 
     func accessibilityPointCandidates(for eventPoint: CGPoint) -> [CGPoint] {
@@ -983,6 +1030,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return nil
         }
         return value as? String
+    }
+
+    func copyAXValueString(_ element: AXUIElement, attribute: String) -> String? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success,
+              let value else {
+            return nil
+        }
+        if let string = value as? String {
+            return string
+        }
+        if let url = value as? URL {
+            return url.absoluteString
+        }
+        if let nsURL = value as? NSURL {
+            return nsURL.absoluteString
+        }
+        return nil
     }
 
     func copyAXStringArray(_ element: AXUIElement, attribute: String) -> [String] {
@@ -1034,11 +1099,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return (role.map(actionableRoles.contains) ?? false) || (subrole.map(actionableSubroles.contains) ?? false)
     }
 
+    func hasActionableAction(_ actionNames: [String]) -> Bool {
+        let actionableActions = Set(["AXOpen", "AXPress", "AXConfirm", "AXPick"])
+        return actionNames.contains(where: actionableActions.contains)
+    }
+
+    func isActionableAncestor(
+        role: String?,
+        subrole: String?,
+        actionNames _: [String]
+    ) -> Bool {
+        isActionable(role: role, subrole: subrole)
+    }
+
+    func isLinkedAncestor(role: String?, urlString: String?) -> Bool {
+        if role == "AXLink" {
+            return true
+        }
+
+        guard normalizedHTTPURLString(urlString) != nil else {
+            return false
+        }
+
+        let ignoredURLLinkRoles: Set<String> = [
+            "AXApplication",
+            "AXBrowser",
+            "AXScrollArea",
+            "AXWebArea",
+            "AXWindow"
+        ]
+        guard let role else {
+            return false
+        }
+
+        return !ignoredURLLinkRoles.contains(role)
+    }
+
+
     func actionabilityReasons(
         role: String?,
         subrole: String?,
         actionNames: [String],
-        element: AXUIElement
+        urlString: String?
     ) -> [String] {
         var reasons = [String]()
 
@@ -1046,32 +1148,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             reasons.append("role")
         }
 
-        let actionableActions = Set(["AXPress", "AXConfirm", "AXPick"])
-        if actionNames.contains(where: actionableActions.contains) {
+        if hasActionableAction(actionNames) {
             reasons.append("press")
         }
 
-        let metadataStrings = [
-            copyAXString(element, attribute: kAXTitleAttribute),
-            copyAXString(element, attribute: kAXDescriptionAttribute),
-            copyAXString(element, attribute: kAXHelpAttribute),
-            copyAXString(element, attribute: kAXIdentifierAttribute as String),
-            copyAXString(element, attribute: kAXValueAttribute)
-        ]
-        .compactMap { $0?.lowercased() }
-
-        let actionableTokens = [
-            "tab",
-            "close",
-            "button",
-            "toolbar",
-            "link"
-        ]
-        if metadataStrings.contains(where: { value in actionableTokens.contains(where: value.contains) }) {
-            reasons.append("metadata")
+        if normalizedHTTPURLString(urlString) != nil {
+            reasons.append("url")
         }
 
         return Array(Set(reasons)).sorted()
+    }
+
+    func normalizedHTTPURLString(_ urlString: String?) -> String? {
+        guard let trimmedURLString = urlString?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmedURLString.isEmpty,
+              let url = URL(string: trimmedURLString),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else {
+            return nil
+        }
+        return url.absoluteString
     }
 
     func deliverScrollEvent(
@@ -1081,22 +1177,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         verticalAmount: Int32
     ) {
         scrollEvent.post(tap: .cgSessionEventTap)
-        updateScrollDeliveryStatus("session tap live-pointer (\(horizontalAmount), \(verticalAmount))")
-    }
-
-    func preferredAxesFallback(for info: AccessibilityTargetInfo) -> AutoscrollAxes {
-        AutoscrollTargetClassifier.fallbackAxes(
-            for: AutoscrollTargetSnapshot(
-                roles: info.roles,
-                subroles: info.subroles,
-                isExplicitlyScrollable: info.canScrollHorizontally || info.canScrollVertically,
-                actions: info.actionNames,
-                title: joinedMetadata(info.titles),
-                identifier: joinedMetadata(info.identifiers),
-                helpText: joinedMetadata(info.helpTexts),
-                valueText: joinedMetadata(info.valueTexts)
-            )
-        )
+        if isStatusMenuOpen {
+            let routeDescription = session.targetPID.map { "latched pid=\($0)" } ?? "session tap"
+            updateScrollDeliveryStatus("\(routeDescription) live-pointer (\(horizontalAmount), \(verticalAmount))")
+        }
     }
 
     @discardableResult
