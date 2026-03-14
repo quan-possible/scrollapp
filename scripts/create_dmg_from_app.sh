@@ -10,10 +10,10 @@ if [ $# -eq 0 ]; then
     echo "Usage: $0 /path/to/Scrollapp.app"
     echo ""
     echo "To build the app:"
-    echo "1. Open Scrollapp.xcodeproj in Xcode"
-    echo "2. Product → Archive"
-    echo "3. Distribute App → Copy App"
-    echo "4. Run: $0 /path/to/exported/Scrollapp.app"
+    echo "1. Ensure Scrollapp.xcodeproj exists (run 'xcodegen generate --spec project.yml' if needed)"
+    echo "2. Open Scrollapp.xcodeproj in Xcode"
+    echo "3. Product → Build or Product → Archive"
+    echo "4. Run: $0 /path/to/built/Scrollapp.app"
     exit 1
 fi
 

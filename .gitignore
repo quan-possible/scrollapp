@@ -110,7 +110,6 @@ env.local
 local.properties
 
 # Extra
-Scrollapp.xcodeproj/
 xcuserdata/
 **/xcuserdata/
 **/**/xcuserdata/
@@ -134,9 +133,6 @@ CVS/
 
 # Build artifacts
 *.dSYM
-
-# Scripts and build tools
-scripts/
 
 # Temporary files  
 dmg_temp/
@@ -170,3 +166,16 @@ Icon
 !default.mode2v3
 *.xcworkspace
 !default.xcworkspace 
+!Scrollapp.xcodeproj/
+!Scrollapp.xcodeproj/project.pbxproj
+!Scrollapp.xcodeproj/project.xcworkspace/
+!Scrollapp.xcodeproj/project.xcworkspace/contents.xcworkspacedata
+!Scrollapp.xcodeproj/xcshareddata/
+!Scrollapp.xcodeproj/xcshareddata/xcschemes/
+!Scrollapp.xcodeproj/xcshareddata/xcschemes/Scrollapp.xcscheme
+!scripts/
+!scripts/build_universal.sh
+!scripts/create_dmg_from_app.sh
+!scripts/README.md
+!project.yml
+!Scrollapp.xcodeproj/**

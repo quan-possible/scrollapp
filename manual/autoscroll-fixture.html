@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Scrollapp Autoscroll Fixture</title>
+    <style>
+        :root {
+            color-scheme: light;
+            --bg: #f5f1e8;
+            --card: rgba(255, 252, 245, 0.92);
+            --ink: #1f2a2e;
+            --muted: #5f6b70;
+            --line: rgba(31, 42, 46, 0.16);
+            --accent: #145a64;
+            --accent-soft: #d6ecef;
+            --warm: #d78a3d;
+            --warm-soft: #f9e6d0;
+            --shadow: 0 18px 40px rgba(31, 42, 46, 0.12);
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+            color: var(--ink);
+            background:
+                radial-gradient(circle at top left, rgba(215, 138, 61, 0.18), transparent 28%),
+                radial-gradient(circle at top right, rgba(20, 90, 100, 0.16), transparent 24%),
+                linear-gradient(180deg, #fbf7ef 0%, var(--bg) 48%, #efe4d3 100%);
+        }
+
+        a {
+            color: var(--accent);
+        }
+
+        .layout {
+            width: min(1120px, calc(100vw - 32px));
+            margin: 0 auto;
+            padding: 24px 0 96px;
+        }
+
+        .hero,
+        .panel,
+        .fixture,
+        .plain-scroll-block {
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 22px;
+            box-shadow: var(--shadow);
+        }
+
+        .hero {
+            padding: 24px;
+            margin-bottom: 18px;
+        }
+
+        .hero h1 {
+            margin: 0 0 8px;
+            font-size: clamp(2rem, 4vw, 3rem);
+            line-height: 1;
+        }
+
+        .hero p {
+            margin: 0;
+            max-width: 780px;
+            color: var(--muted);
+            font-size: 1.02rem;
+            line-height: 1.5;
+        }
+
+        .panel-grid {
+            display: grid;
+            grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+            gap: 18px;
+            align-items: start;
+        }
+
+        .panel {
+            position: sticky;
+            top: 18px;
+            padding: 20px;
+        }
+
+        .panel h2,
+        .fixture h2,
+        .plain-scroll-block h2 {
+            margin: 0 0 10px;
+            font-size: 1.1rem;
+        }
+
+        .panel ol,
+        .panel ul {
+            margin: 10px 0 0 18px;
+            padding: 0;
+            color: var(--muted);
+            line-height: 1.45;
+        }
+
+        .panel li + li,
+        .fixture li + li {
+            margin-top: 6px;
+        }
+
+        .matrix {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid var(--line);
+        }
+
+        .fixtures {
+            display: grid;
+            gap: 18px;
+        }
+
+        .fixture,
+        .plain-scroll-block {
+            padding: 20px;
+        }
+
+        .fixture p,
+        .plain-scroll-block p {
+            margin-top: 0;
+            color: var(--muted);
+            line-height: 1.45;
+        }
+
+        .target-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin: 14px 0 18px;
+        }
+
+        .target-link,
+        .target-button,
+        .target-input {
+            min-height: 44px;
+            border-radius: 14px;
+            border: 1px solid var(--line);
+            background: white;
+            font: inherit;
+        }
+
+        .target-link,
+        .target-button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 16px;
+            text-decoration: none;
+        }
+
+        .target-button {
+            cursor: pointer;
+            color: white;
+            border-color: transparent;
+            background: linear-gradient(135deg, var(--accent), #2e7d86);
+        }
+
+        .target-input {
+            width: min(320px, 100%);
+            padding: 0 14px;
+        }
+
+        .button-state {
+            margin: 0 0 18px;
+            color: var(--muted);
+            font-size: 0.95rem;
+        }
+
+        .plain-scroll-block {
+            min-height: 1200px;
+            background:
+                linear-gradient(180deg, rgba(214, 236, 239, 0.9), rgba(255, 252, 245, 0.95)),
+                var(--card);
+        }
+
+        .plain-scroll-block .marker {
+            display: inline-flex;
+            padding: 6px 12px;
+            border-radius: 999px;
+            background: var(--warm-soft);
+            color: #7a4d17;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        .nested-shell {
+            border: 1px solid var(--line);
+            border-radius: 18px;
+            background: linear-gradient(180deg, #fdfaf5, #f6eee0);
+            padding: 14px;
+        }
+
+        .nested-scroll {
+            height: 320px;
+            overflow: auto;
+            border-radius: 16px;
+            border: 1px solid rgba(20, 90, 100, 0.18);
+            background:
+                linear-gradient(180deg, rgba(20, 90, 100, 0.08), transparent 20%),
+                white;
+            padding: 16px;
+        }
+
+        .nested-card {
+            padding: 14px 16px;
+            border-radius: 16px;
+            margin-bottom: 12px;
+            border: 1px solid var(--line);
+            background: rgba(255, 252, 245, 0.88);
+        }
+
+        .wide-shell {
+            overflow-x: auto;
+            overflow-y: hidden;
+            padding-bottom: 10px;
+            border-radius: 18px;
+            border: 1px solid var(--line);
+            background: white;
+        }
+
+        .wide-strip {
+            width: 2200px;
+            display: grid;
+            grid-template-columns: repeat(10, 200px);
+            gap: 16px;
+            padding: 18px;
+        }
+
+        .wide-card {
+            min-height: 190px;
+            border-radius: 18px;
+            padding: 16px;
+            border: 1px solid rgba(20, 90, 100, 0.14);
+            background: linear-gradient(180deg, rgba(214, 236, 239, 0.65), rgba(255, 252, 245, 0.9));
+        }
+
+        .anchor-target {
+            margin-top: 40px;
+            padding: 18px;
+            border-radius: 16px;
+            border: 1px dashed rgba(215, 138, 61, 0.6);
+            background: rgba(249, 230, 208, 0.72);
+        }
+
+        code {
+            padding: 0.15rem 0.35rem;
+            border-radius: 8px;
+            background: rgba(31, 42, 46, 0.08);
+            font-size: 0.95em;
+        }
+
+        @media (max-width: 900px) {
+            .panel-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .panel {
+                position: static;
+            }
+        }
+    </style>
+</head>
+<body>
+    <main class="layout">
+        <section class="hero">
+            <h1>Scrollapp Manual Validation Fixture</h1>
+            <p>
+                Use this page to verify Windows-style middle-click autoscroll behavior against real browser content.
+                It includes plain page scrolling, a nested scroll region, a horizontal overflow strip, and actionable
+                targets that should keep their default behavior instead of starting autoscroll.
+            </p>
+        </section>
+
+        <div class="panel-grid">
+            <aside class="panel">
+                <h2>How To Use</h2>
+                <ol>
+                    <li>Open this fixture in a normal browser window.</li>
+                    <li>Start Scrollapp and keep its activation method on plain middle click unless you are testing a different trigger.</li>
+                    <li>Run the matrix below in order so plain body scroll and actionable-target pass-through are checked first.</li>
+                </ol>
+
+                <div class="matrix">
+                    <h2>Recommended Matrix</h2>
+                    <ul>
+                        <li>Plain body: middle-click empty body content, then verify only page scroll is latched.</li>
+                        <li>Nested container: middle-click inside the inner panel and verify it scrolls without the outer page taking over immediately.</li>
+                        <li>Horizontal strip: middle-click the wide strip and move left/right to verify horizontal or diagonal motion.</li>
+                        <li>Link target: middle-click the link and verify it follows the anchor instead of starting autoscroll.</li>
+                        <li>Button target: middle-click the button and verify the button action fires instead of autoscroll.</li>
+                        <li>Text field target: middle-click the text field and verify it does not start autoscroll.</li>
+                        <li>Exit swallow: while autoscroll is active, left-click once and verify autoscroll stops without also activating content underneath.</li>
+                    </ul>
+                </div>
+            </aside>
+
+            <section class="fixtures">
+                <section class="plain-scroll-block">
+                    <span class="marker">Plain body scroll area</span>
+                    <h2>1. Body Scroll</h2>
+                    <p>
+                        Middle-click on the empty space in this block. The page itself should become the latched target.
+                        Once active, moving the pointer should scroll the page only, not whichever element the pointer later hovers.
+                    </p>
+                    <p>
+                        This block is intentionally tall so you can test start, stop, and first-click swallow against ordinary page scrolling.
+                    </p>
+                </section>
+
+                <section class="fixture">
+                    <h2>2. Actionable Targets</h2>
+                    <p>
+                        These targets should keep their native middle-click behavior or pass-through behavior. They should not start autoscroll.
+                    </p>
+
+                    <div class="target-row">
+                        <a class="target-link" href="#link-destination">Middle-click link target</a>
+                        <button class="target-button" id="fixture-button" type="button">Middle-click button target</button>
+                        <input class="target-input" type="text" placeholder="Middle-click text-field target">
+                    </div>
+
+                    <p class="button-state" id="button-state">Button action state: not triggered yet.</p>
+                </section>
+
+                <section class="fixture">
+                    <h2>3. Nested Scroll Container</h2>
+                    <p>
+                        Middle-click inside the inner scroll panel below. Autoscroll should stay latched to this inner region first.
+                        The outer page should not start scrolling just because you later move the pointer outside the panel.
+                    </p>
+
+                    <div class="nested-shell">
+                        <div class="nested-scroll">
+                            <div class="nested-card">Inner item 1: use this section to test latched inner scrolling.</div>
+                            <div class="nested-card">Inner item 2: move slightly for slow speed, then further for faster speed.</div>
+                            <div class="nested-card">Inner item 3: click once while active to verify exit-swallow behavior.</div>
+                            <div class="nested-card">Inner item 4: this card exists only to add height.</div>
+                            <div class="nested-card">Inner item 5: this card exists only to add height.</div>
+                            <div class="nested-card">Inner item 6: this card exists only to add height.</div>
+                            <div class="nested-card">Inner item 7: this card exists only to add height.</div>
+                            <div class="nested-card">Inner item 8: this card exists only to add height.</div>
+                            <div class="nested-card">Inner item 9: this card exists only to add height.</div>
+                            <div class="nested-card">Inner item 10: this card exists only to add height.</div>
+                            <div class="nested-card">Inner item 11: this card exists only to add height.</div>
+                            <div class="nested-card">Inner item 12: this card exists only to add height.</div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="fixture">
+                    <h2>4. Horizontal Overflow Strip</h2>
+                    <p>
+                        Middle-click inside the strip, then move left and right. This is the cleanest place to verify horizontal autoscroll and diagonal cursor feel.
+                    </p>
+
+                    <div class="wide-shell">
+                        <div class="wide-strip">
+                            <article class="wide-card">Card 1<br>Start near the left edge.</article>
+                            <article class="wide-card">Card 2<br>Move right to accelerate.</article>
+                            <article class="wide-card">Card 3<br>Test slow diagonal movement here.</article>
+                            <article class="wide-card">Card 4<br>Test larger diagonal movement here.</article>
+                            <article class="wide-card">Card 5<br>Keep moving horizontally.</article>
+                            <article class="wide-card">Card 6<br>Keep moving horizontally.</article>
+                            <article class="wide-card">Card 7<br>Keep moving horizontally.</article>
+                            <article class="wide-card">Card 8<br>Keep moving horizontally.</article>
+                            <article class="wide-card">Card 9<br>Keep moving horizontally.</article>
+                            <article class="wide-card">Card 10<br>End of the strip.</article>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="anchor-target" id="link-destination">
+                    <strong>Anchor destination reached.</strong>
+                    <p>
+                        If middle-clicking the link above jumps here instead of starting autoscroll, the actionable-target pass-through is working for this case.
+                    </p>
+                </section>
+            </section>
+        </div>
+    </main>
+
+    <script>
+        const button = document.getElementById("fixture-button");
+        const buttonState = document.getElementById("button-state");
+
+        button.addEventListener("click", () => {
+            buttonState.textContent = "Button action state: triggered.";
+        });
+    </script>
+</body>
+</html>

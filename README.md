@@ -106,12 +106,34 @@ To build Scrollapp from source:
    cd scrollapp
    ```
 
-2. **Open in Xcode:**
+2. **Ensure the Xcode project exists:**
+   The repository now includes `Scrollapp.xcodeproj` directly. If you ever need to regenerate it from the checked-in spec, install `xcodegen` and run:
+   ```bash
+   xcodegen generate --spec project.yml
+   ```
+
+3. **Open in Xcode:**
    ```bash
    open Scrollapp.xcodeproj
    ```
 
-3. **Build the app:**
+   If the repository lives under Google Drive / `Library/CloudStorage` and Xcode freezes while opening the project, use the local wrapper launcher instead:
+   ```bash
+   SCROLLAPP_XCODE_LOCAL_DIR=/private/tmp/scrollapp-xcode ./scripts/open_local_xcode.sh --check --no-open
+   ```
+   Then launch Xcode manually and open `/private/tmp/scrollapp-xcode/Scrollapp.xcodeproj` from `File > Open...`.
+
+   This creates a local Xcode project wrapper outside the cloud-backed path while keeping the real source files in the original repository via symlinks. If `xcodegen` is installed, it will regenerate the local wrapper project from the checked-in `project.yml`; otherwise it uses the checked-in `Scrollapp.xcodeproj`. You can choose a different local wrapper location by setting `SCROLLAPP_XCODE_LOCAL_DIR`.
+   
+   Code edits made from that local wrapper go straight back to the real repo. For project structure changes, edit `project.yml` in the real repository and rerun the wrapper script. If the script tries to auto-open Xcode and that step fails on your machine, it will print a manual fallback that points you at the generated local project path.
+
+4. **Build or test from the command line if preferred:**
+   ```bash
+   xcodebuild -project Scrollapp.xcodeproj -scheme Scrollapp -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+   xcodebuild -project Scrollapp.xcodeproj -scheme Scrollapp -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO test
+   ```
+
+5. **Build the app in Xcode:**
 
    **Option A: With Apple Developer Program Account**
    - In Xcode, select **Product** → **Archive**
