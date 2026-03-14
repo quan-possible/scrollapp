@@ -1,77 +1,46 @@
 # Project Memory
 
-Last updated: 2026-03-13
+Last updated: 2026-03-14
 
 ## Current Objective
-- Finish Windows-style middle-click autoscroll parity on macOS.
-- Keep the parent agent in sponsor/subagent-manager mode for the remaining implementation and verification work.
+- Restore reliable Windows-style middle-click autoscroll on macOS with the smallest generalizable implementation.
+- Keep runtime behavior simple enough that activation and delivery can be debugged from live evidence instead of stacked heuristics.
 
 ## Current State
-- `Scrollapp/ScrollappApp.swift` uses a real `CGEventTap` rather than only `NSEvent` monitors.
-- `Scrollapp/AutoscrollCore.swift` holds testable autoscroll physics, target classification, and mode logic.
-- The current implementation already supports:
-  - latched autoscroll anchored to the original click point
-  - active target PID capture for synthetic wheel posting
-  - hold vs toggle mode
-  - first-click-to-exit swallowing
-  - horizontal and vertical synthetic scrolling
-  - modifier forwarding during autoscroll for host-app behaviors such as zoom
-- Source-level typecheck has passed for:
-  - `Scrollapp/AutoscrollCore.swift`
-  - `Scrollapp/ScrollappApp.swift`
+- `Scrollapp/AutoscrollCore.swift` is the main pure-logic layer for autoscroll physics and target classification.
+- `Scrollapp/ScrollappApp.swift` owns the event tap, AX hit-testing, autoscroll session state, and synthetic wheel delivery.
+- The simplification pass removed dead UI/test surface:
+  - `Scrollapp/ContentView.swift`
+  - `ScrollappTests/ScrollappTests.swift`
+  - `ScrollappUITests/ScrollappUITestsLaunchTests.swift`
+- The current runtime is back on the smallest delivery path:
+  - synthetic wheel events post through `.cgSessionEventTap`
+  - no forced anchored event-location override
+  - diagnostics report live-pointer delivery again
+- Focused verification is green:
+  - `xcodebuild test -project Scrollapp.xcodeproj -scheme Scrollapp -destination 'platform=macOS' -only-testing:ScrollappTests/AutoscrollCoreTests`
+    - `19` tests passed
+  - `xcodebuild build -project Scrollapp.xcodeproj -scheme Scrollapp -destination 'platform=macOS'`
+    - passed
+  - refreshed `/Applications/Scrollapp.app` from the verified build on 2026-03-14 03:29 MDT
 
 ## Known Gaps
-- The repo still does not contain a checked-in `.xcodeproj`, `.xcworkspace`, or `Package.swift`.
-- README and build scripts still assume `Scrollapp.xcodeproj` exists.
-- Full runtime validation is blocked until the project scaffold is restored or reconstructed.
-- Remaining behavioral risks still to close:
-  - activation classifier is too permissive when AX is missing or ambiguous
-  - nested scroll propagation still needs real runtime proof against browsers/native apps
-  - cursor behavior is still more static than Chromium/Windows directional panning cursors
-  - lifecycle edge cases need explicit validation:
-    - target becomes unscrollable mid-session
-    - window/app/navigation changes
-    - multi-display coordinate correctness
-    - custom browser/Electron UI with weak AX metadata
+- Runtime behavior is still unstable in real browser usage even though focused tests pass.
+- A clean solution for "keep scrolling after the cursor leaves the clicked element" is still unresolved.
+- Prior attempts to force target-latched delivery caused two distinct regressions:
+  - `postToPid(...)` led to visible activation without real scrolling
+  - anchored event-location override reintroduced cursor-pull behavior
+- Browser automation is not reliable proof for the global event-tap path, so live runtime debugging still needs app-side instrumentation or manual validation.
 
-## Research Conclusions
-- Chromium is the strongest practical behavioral spec for Windows-style autoscroll parity.
-- The core behavioral contract is:
-  - target-latched activation, not hover-routed scrolling
-  - per-axis propagation from the clicked target upward
-  - `initial` / `holding` / `toggled` mode semantics
-  - first click exits and is swallowed
-  - actionable middle-click targets should pass through
-  - 15 px dead zone and direction-aware cursor matter to the feel
-- Apple-side architecture is already on the right primitive stack:
-  - `CGEventTapCreate`
-  - `CGEventSetLocation`
-  - `CGEventPostToPid`
-  - `AXUIElementCopyElementAtPosition`
-  - AX scroll bar inspection and writable AX values as fallback
-
-## Build And Tooling Notes
-- Xcode is installed at `/Applications/Xcode.app`.
-- The active developer path is expected to be Xcode, not Command Line Tools.
-- `tmp/` is the disposable workspace for rolling snapshots and research notes.
+## Current Guidance
+- Prefer structural classification rules over metadata-heavy heuristics.
+- Do not reintroduce cursor anchoring, pointer snapping, or broad URL-based link inference without fresh runtime evidence.
+- If the next pass continues to fail in live usage, instrument the delivery/classification path rather than adding more heuristics.
 
 ## Canonical Temp Context
-- Research snapshot: `tmp/autoscroll-research-2026-03-13.md`
-- A canonical `*-ongoing.md` snapshot should be maintained during the implementation pass.
-
-## Next Recommended Steps
-- Restore or reconstruct the Xcode project scaffold.
-- Finish the remaining autoscroll parity gaps with delegated workers.
-- Add or refine regression tests around classifier behavior, mode transitions, and lifecycle exits.
-- Run end-to-end manual validation in:
-  - Safari
-  - Chrome
-  - Finder
-  - Xcode
-  - a native `NSScrollView`
+- Ongoing snapshot: `tmp/autoscroll-simplify-ongoing.md`
 
 ## Important Constraints
 - Do not revert unrelated working tree changes.
-- Prefer subagent fan-out for moderate or larger work.
 - Use `apply_patch` for manual file edits.
 - Keep temporary artifacts under `tmp/`.
