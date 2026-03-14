@@ -5,7 +5,6 @@
 
 import SwiftUI
 import Cocoa
-import UserNotifications
 import ServiceManagement
 import ApplicationServices
 
@@ -15,104 +14,189 @@ struct ScrollappApp: App {
 
     var body: some Scene {
         Settings {
-            EmptyView() // No window needed
+            EmptyView()
         }
     }
 }
 
-class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+    private let syntheticScrollUserData: Int64 = 0x5352434C
+    private let physics = AutoscrollPhysics()
+
     var statusItem: NSStatusItem!
-    var isAutoScrolling = false
+    var diagnosticsMenuItems = [RuntimeDiagnosticItem: NSMenuItem]()
     var scrollTimer: Timer?
-    var originalPoint: CGPoint?
-    var globalMonitor: Any?
-    var localMonitor: Any?
-    var mouseMoveMonitor: Any?
-    var optionKeyMonitor: Any?
-    var scrollMonitor: Any?
-    var clickMonitor: Any?
-    var scrollCursor: NSCursor?
-    var isTrackpadMode = false
-    var lastScrollTime: Date?
-    var scrollDetectionWindow = [CGFloat]()
-    var isDirectionInverted = false  // Default is now "up scrolls up"
-    var launchAtLogin = false        // Track launch at login state
-    var scrollSensitivity: Double = 1.0  // Default sensitivity multiplier
-    var activationMethod: ActivationMethod = .middleClick  // Default activation method
-    
-    enum ActivationMethod: String, CaseIterable {
-        case middleClick = "Middle Click"
-        case shiftMiddleClick = "Shift + Middle Click"
-        case cmdMiddleClick = "Cmd + Middle Click"
-        case optionMiddleClick = "Option + Middle Click"
-        case button4 = "Mouse Button 4"
-        case button5 = "Mouse Button 5"
-        case doubleMiddleClick = "Double Middle Click"
-        
-        var buttonNumber: Int? {
-            switch self {
-            case .middleClick, .shiftMiddleClick, .cmdMiddleClick, .optionMiddleClick, .doubleMiddleClick:
-                return 2
-            case .button4:
-                return 3
-            case .button5:
-                return 4
-            }
+    var eventTap: CFMachPort?
+    var eventTapSource: CFRunLoopSource?
+    var indicatorPanel: NSPanel?
+    var indicatorView: AutoscrollIndicatorView?
+    var activeSession: AutoscrollSession?
+    var activationButtonIsDown = false
+    var swallowedButtons = Set<Int>()
+    var lastObservedFlags: CGEventFlags = []
+    var lastPhysicalPointerLocation: CGPoint?
+    var isAutoScrolling = false
+    var isDirectionInverted = false
+    var launchAtLogin = false
+    var scrollSensitivity: Double = 1.0
+    var runtimePermissionStatus = RuntimePermissionStatus()
+    var eventTapStatus = "Event Tap: Inactive"
+    var lastMouseTriggerStatus = "Last Mouse Trigger: Waiting..."
+    var lastActivationMatchStatus = "Activation Match: Waiting..."
+    var lastAXHitTestStatus = "AX Hit-Test: Waiting..."
+    var lastActivationDecisionStatus = "Activation Decision: Waiting..."
+    var lastSessionStateStatus = "Session State: Inactive"
+    var lastScrollEmissionStatus = "Scroll Emission: Waiting..."
+    var lastScrollDeliveryStatus = "Scroll Delivery: Waiting..."
+    var lastStopReasonStatus = "Stop Reason: None"
+
+    struct AccessibilityTargetInfo {
+        var pid: pid_t?
+        var roles = [String]()
+        var subroles = [String]()
+        var actionNames = [String]()
+        var titles = [String]()
+        var identifiers = [String]()
+        var helpTexts = [String]()
+        var valueTexts = [String]()
+        var actionabilityReasons = [String]()
+        var canScrollHorizontally = false
+        var canScrollVertically = false
+        var isActionable = false
+    }
+
+    struct RuntimePermissionStatus {
+        var accessibilityTrusted = false
+        var canListenEvents = false
+        var canPostEvents = false
+    }
+
+    var activationButtonNumber: Int {
+        2
+    }
+
+    final class AutoscrollIndicatorView: NSView {
+        override var isOpaque: Bool {
+            false
         }
-        
-        var requiresModifier: Bool {
-            switch self {
-            case .shiftMiddleClick, .cmdMiddleClick, .optionMiddleClick:
-                return true
-            default:
-                return false
-            }
+
+        override func draw(_ dirtyRect: NSRect) {
+            NSColor.clear.setFill()
+            dirtyRect.fill()
+
+            let bounds = self.bounds.insetBy(dx: 3, dy: 3)
+
+            NSColor.windowBackgroundColor.withAlphaComponent(0.12).setFill()
+            let fillPath = NSBezierPath(ovalIn: bounds)
+            fillPath.fill()
+
+            NSColor.labelColor.withAlphaComponent(0.42).setStroke()
+            let outerRing = NSBezierPath(ovalIn: bounds)
+            outerRing.lineWidth = 1
+            outerRing.stroke()
+
+            let innerRingRect = bounds.insetBy(dx: 4.5, dy: 4.5)
+            NSColor.labelColor.withAlphaComponent(0.12).setStroke()
+            let innerRing = NSBezierPath(ovalIn: innerRingRect)
+            innerRing.lineWidth = 1
+            innerRing.stroke()
         }
-        
-        var modifierFlags: NSEvent.ModifierFlags? {
+    }
+
+    enum RuntimeDiagnosticItem: CaseIterable {
+        case accessibility
+        case listenEvent
+        case postEvent
+        case eventTap
+        case lastMouseTrigger
+        case activationMatch
+        case axHitTest
+        case activationDecision
+        case sessionState
+        case scrollEmission
+        case scrollDelivery
+        case stopReason
+
+        var placeholderTitle: String {
             switch self {
-            case .shiftMiddleClick:
-                return .shift
-            case .cmdMiddleClick:
-                return .command
-            case .optionMiddleClick:
-                return .option
-            default:
-                return nil
+            case .accessibility:
+                return "Accessibility: Checking..."
+            case .listenEvent:
+                return "Input Monitoring: Checking..."
+            case .postEvent:
+                return "Event Posting: Checking..."
+            case .eventTap:
+                return "Event Tap: Checking..."
+            case .lastMouseTrigger:
+                return "Last Mouse Trigger: Waiting..."
+            case .activationMatch:
+                return "Activation Match: Waiting..."
+            case .axHitTest:
+                return "AX Hit-Test: Waiting..."
+            case .activationDecision:
+                return "Activation Decision: Waiting..."
+            case .sessionState:
+                return "Session State: Inactive"
+            case .scrollEmission:
+                return "Scroll Emission: Waiting..."
+            case .scrollDelivery:
+                return "Scroll Delivery: Waiting..."
+            case .stopReason:
+                return "Stop Reason: None"
             }
         }
     }
 
+    var isAutomatedTestMode: Bool {
+        let environment = ProcessInfo.processInfo.environment
+        let arguments = ProcessInfo.processInfo.arguments
+
+        if isEnabledTestEnvironmentValue(environment["SCROLLAPP_TEST_MODE"]) {
+            return true
+        }
+
+        if isEnabledTestEnvironmentValue(environment["SCROLLAPP_UI_TEST_MODE"]) {
+            return true
+        }
+
+        if arguments.contains("--scrollapp-test-mode") {
+            return true
+        }
+
+        return environment["XCTestConfigurationFilePath"] != nil
+    }
+
+    func isEnabledTestEnvironmentValue(_ value: String?) -> Bool {
+        guard let rawValue = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !rawValue.isEmpty else {
+            return false
+        }
+
+        let normalized = rawValue.lowercased()
+        return normalized != "0" && normalized != "false" && normalized != "no"
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Load user preferences
         isDirectionInverted = UserDefaults.standard.bool(forKey: "invertScrollDirection")
         launchAtLogin = UserDefaults.standard.bool(forKey: "launchAtLogin")
         scrollSensitivity = UserDefaults.standard.double(forKey: "scrollSensitivity")
-        if scrollSensitivity == 0 { scrollSensitivity = 1.0 } // Default if not set
-        
-        // Load activation method
-        if let savedMethod = UserDefaults.standard.string(forKey: "activationMethod"),
-           let method = ActivationMethod(rawValue: savedMethod) {
-            activationMethod = method
+        if scrollSensitivity == 0 {
+            scrollSensitivity = 1.0
         }
-        
-        // Set initial launch at login state based on saved preference
-        updateLoginItemState()
-        
-        // Check and request Accessibility permissions
-        checkAccessibilityPermissions()
-        
+
         setupMenuBar()
-        createScrollCursor()
-        setupMiddleClickListeners()
-        setupTrackpadActivation()
-        
-        // Request notification permission
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+
+        guard !isAutomatedTestMode else {
+            return
+        }
+
+        updateLoginItemState()
+        refreshRuntimeDiagnostics(promptForMissingPermissions: true, retryEventTap: true)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         stopAutoScroll()
+        tearDownEventTap()
     }
 
     func setupMenuBar() {
@@ -120,15 +204,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let button = statusItem.button {
             button.image = NSImage(systemSymbolName: "arrow.up.and.down.circle", accessibilityDescription: "Scrollapp")
         }
-        
+
         let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: "Start/Stop Auto-Scroll", action: #selector(toggleTrackpadMode), keyEquivalent: ""))
-        menu.addItem(NSMenuItem.separator())
-        
-        // Add sensitivity slider
+        menu.delegate = self
+
         let sensitivityItem = NSMenuItem(title: String(format: "Scroll Speed: %.1fx", scrollSensitivity), action: nil, keyEquivalent: "")
         let sensitivityView = NSView(frame: NSRect(x: 0, y: 0, width: 250, height: 30))
-        
+
         let slider = NSSlider(frame: NSRect(x: 20, y: 5, width: 150, height: 20))
         slider.minValue = 0.2
         slider.maxValue = 3.0
@@ -136,305 +218,595 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         slider.target = self
         slider.action = #selector(sensitivityChanged(_:))
         slider.isContinuous = true
-        
+
         let label = NSTextField(labelWithString: String(format: "%.1fx", scrollSensitivity))
         label.frame = NSRect(x: 180, y: 5, width: 50, height: 20)
         label.alignment = .center
-        label.tag = 100 // Tag to find it later
-        
+        label.tag = 100
+
         sensitivityView.addSubview(slider)
         sensitivityView.addSubview(label)
         sensitivityItem.view = sensitivityView
         menu.addItem(sensitivityItem)
-        
         menu.addItem(NSMenuItem.separator())
-        
-        // Add activation method submenu
-        let activationMenu = NSMenu()
-        let activationItem = NSMenuItem(title: "Activation Method", action: nil, keyEquivalent: "")
-        activationItem.submenu = activationMenu
-        
-        for method in ActivationMethod.allCases {
-            let methodItem = NSMenuItem(title: method.rawValue, action: #selector(selectActivationMethod(_:)), keyEquivalent: "")
-            methodItem.representedObject = method
-            methodItem.state = (method == activationMethod) ? .on : .off
-            activationMenu.addItem(methodItem)
-        }
-        
-        menu.addItem(activationItem)
-        
-        // Add inverted direction toggle option - reworded to match new default
+
         let invertItem = NSMenuItem(title: "Invert Scrolling Direction", action: #selector(toggleDirectionInversion), keyEquivalent: "")
         invertItem.state = isDirectionInverted ? .on : .off
         menu.addItem(invertItem)
-        
-        // Add launch at login toggle
+
         let launchItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         launchItem.state = launchAtLogin ? .on : .off
         menu.addItem(launchItem)
-        
+
+        menu.addItem(NSMenuItem.separator())
+        addDiagnosticsItems(to: menu)
+        menu.addItem(NSMenuItem(title: "Refresh Permissions", action: #selector(refreshPermissionsMenuSelected), keyEquivalent: "r"))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "About Scrollapp", action: #selector(showAbout), keyEquivalent: ""))
-        
-        let methodsMenu = NSMenu()
-        let methodsItem = NSMenuItem(title: "Activation Methods", action: nil, keyEquivalent: "")
-        methodsItem.submenu = methodsMenu
-        
-        methodsMenu.addItem(NSMenuItem(title: "Mouse - Configurable button/modifier (see Activation Method)", action: nil, keyEquivalent: ""))
-        methodsMenu.addItem(NSMenuItem(title: "Option + Scroll - Start auto-scroll (trackpad)", action: nil, keyEquivalent: ""))
-        methodsMenu.addItem(NSMenuItem(title: "Menu Bar - Use the menu option above", action: nil, keyEquivalent: ""))
-        methodsMenu.addItem(NSMenuItem(title: "Click - Stop auto-scroll", action: nil, keyEquivalent: ""))
-        
-        menu.addItem(methodsItem)
-        
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q"))
         statusItem.menu = menu
+        updateDiagnosticsMenu()
     }
 
-    func createScrollCursor() {
-        let size = CGSize(width: 20, height: 20)
-        let image = NSImage(size: size)
-
-        image.lockFocus()
-        NSColor.clear.set()
-        NSRect(x: 0, y: 0, width: size.width, height: size.height).fill()
-
-        NSColor.systemBlue.withAlphaComponent(0.6).setFill()
-        NSBezierPath(ovalIn: NSRect(x: 4, y: 4, width: 12, height: 12)).fill()
-
-        NSColor.white.setStroke()
-        let upArrow = NSBezierPath()
-        upArrow.move(to: NSPoint(x: 10, y: 2))
-        upArrow.line(to: NSPoint(x: 10, y: 0))
-        upArrow.line(to: NSPoint(x: 8, y: 2))
-        upArrow.move(to: NSPoint(x: 10, y: 0))
-        upArrow.line(to: NSPoint(x: 12, y: 2))
-        upArrow.lineWidth = 1
-        upArrow.stroke()
-
-        let downArrow = NSBezierPath()
-        downArrow.move(to: NSPoint(x: 10, y: 18))
-        downArrow.line(to: NSPoint(x: 10, y: 20))
-        downArrow.line(to: NSPoint(x: 8, y: 18))
-        downArrow.move(to: NSPoint(x: 10, y: 20))
-        downArrow.line(to: NSPoint(x: 12, y: 18))
-        downArrow.lineWidth = 1
-        downArrow.stroke()
-        image.unlockFocus()
-
-        scrollCursor = NSCursor(image: image, hotSpot: NSPoint(x: 10, y: 10))
-    }
-
-    var lastClickTime: Date?
-    var clickCount = 0
-
-    func setupMiddleClickListeners() {
-        // Remove existing monitors
-        if let monitor = globalMonitor {
-            NSEvent.removeMonitor(monitor)
-        }
-        if let monitor = localMonitor {
-            NSEvent.removeMonitor(monitor)
-        }
-        
-        guard let buttonNumber = activationMethod.buttonNumber else { return }
-        
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .otherMouseDown) { [weak self] event in
-            guard let self = self, event.buttonNumber == buttonNumber else { return }
-            self.handleMouseClick(event, at: NSEvent.mouseLocation)
-        }
-
-        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .otherMouseDown) { [weak self] event in
-            guard let self = self, event.buttonNumber == buttonNumber else { return event }
-            self.handleMouseClick(event, at: NSEvent.mouseLocation)
-            return event
+    func addDiagnosticsItems(to menu: NSMenu) {
+        for diagnostic in RuntimeDiagnosticItem.allCases {
+            let item = NSMenuItem(title: diagnostic.placeholderTitle, action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            diagnosticsMenuItems[diagnostic] = item
+            menu.addItem(item)
         }
     }
-    
-    func handleMouseClick(_ event: NSEvent, at location: NSPoint) {
-        // Check if this activation method requires modifier keys
-        if activationMethod.requiresModifier {
-            guard let requiredModifier = activationMethod.modifierFlags,
-                  event.modifierFlags.contains(requiredModifier) else { return }
+
+    func menuWillOpen(_ menu: NSMenu) {
+        guard !isAutomatedTestMode else {
+            return
         }
-        
-        // Handle double-click detection for double middle click
-        if activationMethod == .doubleMiddleClick {
-            let now = Date()
-            if let lastClick = lastClickTime, now.timeIntervalSince(lastClick) < 0.5 {
-                clickCount += 1
-                if clickCount >= 2 {
-                    // Double click detected
-                    clickCount = 0
-                    lastClickTime = nil
-                    isAutoScrolling ? stopAutoScroll() : startAutoScroll(at: location)
-                }
+        refreshRuntimeDiagnostics(promptForMissingPermissions: false, retryEventTap: false)
+    }
+
+    func updateDiagnosticsMenu() {
+        diagnosticsMenuItems[.accessibility]?.title = statusLine(
+            label: "Accessibility",
+            isGranted: runtimePermissionStatus.accessibilityTrusted
+        )
+        diagnosticsMenuItems[.listenEvent]?.title = statusLine(
+            label: "Input Monitoring",
+            isGranted: runtimePermissionStatus.canListenEvents
+        )
+        diagnosticsMenuItems[.postEvent]?.title = statusLine(
+            label: "Event Posting",
+            isGranted: runtimePermissionStatus.canPostEvents
+        )
+        diagnosticsMenuItems[.eventTap]?.title = eventTapStatus
+        diagnosticsMenuItems[.lastMouseTrigger]?.title = lastMouseTriggerStatus
+        diagnosticsMenuItems[.activationMatch]?.title = lastActivationMatchStatus
+        diagnosticsMenuItems[.axHitTest]?.title = lastAXHitTestStatus
+        diagnosticsMenuItems[.activationDecision]?.title = lastActivationDecisionStatus
+        diagnosticsMenuItems[.sessionState]?.title = lastSessionStateStatus
+        diagnosticsMenuItems[.scrollEmission]?.title = lastScrollEmissionStatus
+        diagnosticsMenuItems[.scrollDelivery]?.title = lastScrollDeliveryStatus
+        diagnosticsMenuItems[.stopReason]?.title = lastStopReasonStatus
+    }
+
+    func statusLine(label: String, isGranted: Bool) -> String {
+        "\(label): \(isGranted ? "Granted" : "Missing")"
+    }
+
+    func updateLastMouseTrigger(buttonNumber: Int, location: CGPoint) {
+        lastMouseTriggerStatus = String(
+            format: "Last Mouse Trigger: otherMouseDown button=%d @ (%.0f, %.0f)",
+            buttonNumber,
+            location.x,
+            location.y
+        )
+        updateDiagnosticsMenu()
+    }
+
+    func updateActivationMatchStatus(_ description: String) {
+        lastActivationMatchStatus = "Activation Match: \(description)"
+        updateDiagnosticsMenu()
+    }
+
+    func updateAXHitTestStatus(_ description: String) {
+        lastAXHitTestStatus = "AX Hit-Test: \(description)"
+        updateDiagnosticsMenu()
+    }
+
+    func updateActivationDecisionStatus(_ description: String) {
+        lastActivationDecisionStatus = "Activation Decision: \(description)"
+        updateDiagnosticsMenu()
+    }
+
+    func updateSessionStateStatus(_ description: String) {
+        lastSessionStateStatus = "Session State: \(description)"
+        updateDiagnosticsMenu()
+    }
+
+    func updateScrollEmissionStatus(_ description: String) {
+        lastScrollEmissionStatus = "Scroll Emission: \(description)"
+        updateDiagnosticsMenu()
+    }
+
+    func updateScrollDeliveryStatus(_ description: String) {
+        lastScrollDeliveryStatus = "Scroll Delivery: \(description)"
+        updateDiagnosticsMenu()
+    }
+
+    func updateStopReasonStatus(_ description: String) {
+        lastStopReasonStatus = "Stop Reason: \(description)"
+        updateDiagnosticsMenu()
+    }
+
+    func summarizeRoles(_ roles: [String]) -> String {
+        let summary = roles.prefix(4).joined(separator: " > ")
+        if roles.count > 4 {
+            return "\(summary) > ..."
+        }
+        return summary.isEmpty ? "no roles" : summary
+    }
+
+    func summarizeActionability(_ reasons: [String]) -> String {
+        guard !reasons.isEmpty else {
+            return ""
+        }
+        return " \(reasons.prefix(2).joined(separator: ", "))"
+    }
+
+    func missingPermissionNames(from status: RuntimePermissionStatus) -> [String] {
+        var names = [String]()
+        if !status.accessibilityTrusted {
+            names.append("Accessibility")
+        }
+        if !status.canListenEvents {
+            names.append("Input Monitoring")
+        }
+        if !status.canPostEvents {
+            names.append("Event Posting")
+        }
+        return names
+    }
+
+    func refreshRuntimeDiagnostics(promptForMissingPermissions: Bool, retryEventTap: Bool) {
+        runtimePermissionStatus = checkPermissions(promptForMissingPermissions: promptForMissingPermissions)
+        if retryEventTap {
+            setupEventTap()
+        } else {
+            updateDiagnosticsMenu()
+        }
+    }
+
+    func setupEventTap() {
+        tearDownEventTap()
+
+        let interestedTypes: [CGEventType] = [
+            .leftMouseDown,
+            .leftMouseUp,
+            .mouseMoved,
+            .leftMouseDragged,
+            .rightMouseDown,
+            .rightMouseUp,
+            .rightMouseDragged,
+            .otherMouseDown,
+            .otherMouseUp,
+            .otherMouseDragged,
+            .flagsChanged,
+            .scrollWheel
+        ]
+        let mask = interestedTypes.reduce(CGEventMask(0)) { partial, type in
+            partial | (1 << type.rawValue)
+        }
+
+        let callback: CGEventTapCallBack = { proxy, type, event, userInfo in
+            guard let userInfo else {
+                return Unmanaged.passUnretained(event)
+            }
+            let delegate = Unmanaged<AppDelegate>.fromOpaque(userInfo).takeUnretainedValue()
+            return delegate.handleEventTap(proxy: proxy, type: type, event: event)
+        }
+
+        guard let tap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .defaultTap,
+            eventsOfInterest: mask,
+            callback: callback,
+            userInfo: Unmanaged.passUnretained(self).toOpaque()
+        ) else {
+            let missingPermissions = missingPermissionNames(from: runtimePermissionStatus)
+            if missingPermissions.isEmpty {
+                eventTapStatus = "Event Tap: Unavailable"
             } else {
-                clickCount = 1
-                lastClickTime = now
-                // Reset click count after timeout
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                    self?.clickCount = 0
-                    self?.lastClickTime = nil
+                eventTapStatus = "Event Tap: Unavailable (\(missingPermissions.joined(separator: ", ")))"
+            }
+            updateDiagnosticsMenu()
+            return
+        }
+
+        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        eventTap = tap
+        eventTapSource = source
+        if let source {
+            CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        }
+        CGEvent.tapEnable(tap: tap, enable: true)
+        eventTapStatus = "Event Tap: Active"
+        updateDiagnosticsMenu()
+    }
+
+    func tearDownEventTap() {
+        if let source = eventTapSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
+        }
+        if let tap = eventTap {
+            CFMachPortInvalidate(tap)
+        }
+        eventTapSource = nil
+        eventTap = nil
+        eventTapStatus = "Event Tap: Inactive"
+        updateDiagnosticsMenu()
+    }
+
+    func handleEventTap(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            if let tap = eventTap {
+                CGEvent.tapEnable(tap: tap, enable: true)
+                eventTapStatus = "Event Tap: Active"
+                updateDiagnosticsMenu()
+            }
+            return Unmanaged.passUnretained(event)
+        }
+
+        lastObservedFlags = event.flags
+        notePhysicalPointerLocationIfNeeded(for: type, event: event)
+        let buttonNumber = Int(event.getIntegerValueField(.mouseEventButtonNumber))
+
+        switch type {
+        case .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
+            return Unmanaged.passUnretained(event)
+        case .otherMouseDown:
+            return handleOtherMouseDown(event, buttonNumber: buttonNumber)
+        case .otherMouseUp:
+            return handleOtherMouseUp(event, buttonNumber: buttonNumber)
+        case .scrollWheel:
+            return handleScrollWheel(event)
+        case .leftMouseDown:
+            return handleStopClick(event, buttonNumber: 0)
+        case .leftMouseUp:
+            return swallowIfNeeded(event, buttonNumber: 0)
+        case .rightMouseDown:
+            return handleStopClick(event, buttonNumber: 1)
+        case .rightMouseUp:
+            return swallowIfNeeded(event, buttonNumber: 1)
+        case .flagsChanged:
+            return Unmanaged.passUnretained(event)
+        default:
+            return Unmanaged.passUnretained(event)
+        }
+    }
+
+    func handleScrollWheel(_ event: CGEvent) -> Unmanaged<CGEvent>? {
+        if event.getIntegerValueField(.eventSourceUserData) == syntheticScrollUserData {
+            return Unmanaged.passUnretained(event)
+        }
+
+        if isAutoScrolling {
+            updateStopReasonStatus("interrupted by external scroll input")
+            stopAutoScroll()
+        }
+        return Unmanaged.passUnretained(event)
+    }
+
+    func handleOtherMouseDown(_ event: CGEvent, buttonNumber: Int) -> Unmanaged<CGEvent>? {
+        let activationPoint = event.unflippedLocation
+        let deliveryPoint = event.location
+        lastPhysicalPointerLocation = activationPoint
+        updateLastMouseTrigger(buttonNumber: buttonNumber, location: activationPoint)
+
+        if swallowedButtons.contains(buttonNumber) {
+            return nil
+        }
+
+        if isAutoScrolling {
+            if buttonNumber == activationButtonNumber {
+                updateActivationMatchStatus("already active")
+                updateActivationDecisionStatus("stop active autoscroll")
+                updateStopReasonStatus("replaced by new activation button")
+                swallowedButtons.insert(buttonNumber)
+                stopAutoScroll()
+                return nil
+            }
+            return Unmanaged.passUnretained(event)
+        }
+
+        if buttonNumber != activationButtonNumber {
+            updateActivationMatchStatus("no (button \(buttonNumber) != \(activationButtonNumber))")
+            updateActivationDecisionStatus("pass through (button mismatch)")
+            return Unmanaged.passUnretained(event)
+        }
+
+        activationButtonIsDown = true
+        updateActivationMatchStatus("yes")
+
+        switch classifyActivation(at: deliveryPoint) {
+        case .passThrough:
+            activationButtonIsDown = false
+            return Unmanaged.passUnretained(event)
+        case .start(let session):
+            swallowedButtons.insert(buttonNumber)
+            startAutoScroll(
+                with: AutoscrollSession(
+                    anchorPoint: activationPoint,
+                    deliveryPoint: deliveryPoint,
+                    targetPID: session.targetPID,
+                    canScrollHorizontally: session.canScrollHorizontally,
+                    canScrollVertically: session.canScrollVertically,
+                    activationButtonNumber: session.activationButtonNumber,
+                    mode: session.mode,
+                    velocity: session.velocity
+                )
+            )
+            return nil
+        }
+    }
+
+    func handleOtherMouseUp(_ event: CGEvent, buttonNumber: Int) -> Unmanaged<CGEvent>? {
+        lastPhysicalPointerLocation = event.unflippedLocation
+        if buttonNumber == activationButtonNumber {
+            activationButtonIsDown = false
+        }
+
+        if swallowedButtons.contains(buttonNumber) {
+            swallowedButtons.remove(buttonNumber)
+
+            if var session = activeSession, buttonNumber == session.activationButtonNumber {
+                session.mode = AutoscrollBehavior.transitionedMode(
+                    from: session.mode,
+                    anchorPoint: session.anchorPoint,
+                    currentPoint: event.unflippedLocation,
+                    activationButtonIsDown: false
+                )
+
+                if session.mode == .inactive {
+                    updateSessionStateStatus("mode=inactive buttonDown=N")
+                    updateStopReasonStatus("activation button released after hold")
+                    stopAutoScroll()
+                } else {
+                    activeSession = session
+                    updateSessionStateStatus("mode=\(String(describing: session.mode)) buttonDown=N")
                 }
             }
-        } else {
-            // Single click activation
-            isAutoScrolling ? stopAutoScroll() : startAutoScroll(at: location)
+            return nil
         }
+
+        return Unmanaged.passUnretained(event)
     }
 
-    func startAutoScroll(at point: NSPoint) {
+    func handleStopClick(_ event: CGEvent, buttonNumber: Int) -> Unmanaged<CGEvent>? {
+        guard isAutoScrolling else {
+            return Unmanaged.passUnretained(event)
+        }
+
+        updateStopReasonStatus("stopped by click \(buttonNumber)")
         stopAutoScroll()
-        originalPoint = point
+        if AutoscrollStopClickPolicy.shouldSwallow(buttonNumber: buttonNumber) {
+            swallowedButtons.insert(buttonNumber)
+            return nil
+        }
+        return Unmanaged.passUnretained(event)
+    }
+
+    func swallowIfNeeded(_ event: CGEvent, buttonNumber: Int) -> Unmanaged<CGEvent>? {
+        if swallowedButtons.contains(buttonNumber) {
+            swallowedButtons.remove(buttonNumber)
+            return nil
+        }
+        return Unmanaged.passUnretained(event)
+    }
+
+    func classifyActivation(at eventPoint: CGPoint) -> AutoscrollActivationDisposition {
+        guard let info = accessibilityTargetInfo(at: eventPoint) else {
+            updateAXHitTestStatus("failed @ \(Int(eventPoint.x.rounded())),\(Int(eventPoint.y.rounded()))")
+            updateActivationDecisionStatus("pass through (no AX target)")
+            return .passThrough
+        }
+
+        updateAXHitTestStatus(
+            "\(summarizeRoles(info.roles)) [H:\(info.canScrollHorizontally ? "Y" : "N") V:\(info.canScrollVertically ? "Y" : "N")\(info.isActionable ? " actionable" : "")\(summarizeActionability(info.actionabilityReasons))]"
+        )
+
+        let targetBehavior = AutoscrollTargetClassifier.behavior(
+            for: AutoscrollTargetSnapshot(
+                roles: info.roles,
+                subroles: info.subroles,
+                isExplicitlyScrollable: info.canScrollHorizontally || info.canScrollVertically,
+                actions: info.actionNames,
+                title: joinedMetadata(info.titles),
+                identifier: joinedMetadata(info.identifiers),
+                helpText: joinedMetadata(info.helpTexts),
+                valueText: joinedMetadata(info.valueTexts)
+            )
+        )
+
+        if targetBehavior == .passThrough {
+            updateActivationDecisionStatus("pass through (classifier)")
+            return .passThrough
+        }
+
+        if targetBehavior == .undetermined {
+            updateActivationDecisionStatus("pass through (undetermined target)")
+            return .passThrough
+        }
+
+        let fallbackAxes = preferredAxesFallback(for: info)
+        let canScrollHorizontally = info.canScrollHorizontally || fallbackAxes.horizontal
+        let canScrollVertically = info.canScrollVertically || fallbackAxes.vertical
+
+        guard canScrollHorizontally || canScrollVertically else {
+            updateActivationDecisionStatus("pass through (no scroll axes)")
+            return .passThrough
+        }
+
+        let axisDescription: String
+        switch (canScrollHorizontally, canScrollVertically) {
+        case (true, true):
+            axisDescription = "start (horizontal + vertical)"
+        case (true, false):
+            axisDescription = "start (horizontal)"
+        case (false, true):
+            axisDescription = "start (vertical)"
+        case (false, false):
+            axisDescription = "pass through (no scroll axes)"
+        }
+        updateActivationDecisionStatus(axisDescription)
+
+        return .start(
+            AutoscrollSession(
+                anchorPoint: eventPoint,
+                deliveryPoint: eventPoint,
+                targetPID: info.pid,
+                canScrollHorizontally: canScrollHorizontally,
+                canScrollVertically: canScrollVertically,
+                activationButtonNumber: activationButtonNumber
+            )
+        )
+    }
+
+    func startAutoScroll(with session: AutoscrollSession) {
+        let wasActivationButtonDown = activationButtonIsDown
+        stopAutoScroll()
+        activationButtonIsDown = wasActivationButtonDown
+        activeSession = session
         isAutoScrolling = true
-        NSCursor.hide()
-        scrollCursor?.set()
+        updateScrollEmissionStatus(
+            "armed @ \(Int(session.anchorPoint.x.rounded())),\(Int(session.anchorPoint.y.rounded()))"
+        )
+        updateScrollDeliveryStatus("armed at latched anchor")
+        updateSessionStateStatus("mode=initial buttonDown=Y dx=0 dy=0")
+        updateStopReasonStatus("None")
+        updateIndicator(for: session)
 
         scrollTimer = Timer.scheduledTimer(withTimeInterval: 0.01, repeats: true) { [weak self] _ in
             self?.performScroll()
-            self?.scrollCursor?.set() // keep forcing cursor
         }
         RunLoop.current.add(scrollTimer!, forMode: .common)
     }
 
     func performScroll() {
-        guard let start = originalPoint else { return }
-        let current = NSEvent.mouseLocation
-        let deltaY = current.y - start.y
+        guard var session = activeSession else { return }
 
-        let deadZone: CGFloat = 5.0
-        
-        // Flipped the default direction - now moving up scrolls up by default
-        let directionMultiplier = isDirectionInverted ? 1.0 : -1.0  // Inverted the multiplier
-        let direction = (deltaY > 0 ? -1.0 : 1.0) * directionMultiplier
-        
-        let distance = max(0, abs(deltaY) - deadZone)
+        let currentPoint = lastPhysicalPointerLocation ?? session.anchorPoint
+        if activationButtonIsDown {
+            session.mode = AutoscrollBehavior.transitionedMode(
+                from: session.mode,
+                anchorPoint: session.anchorPoint,
+                currentPoint: currentPoint,
+                activationButtonIsDown: true
+            )
+        }
 
-        // Quadratic acceleration: scrollSpeed grows faster as distance increases
-        let acceleration = pow(distance / 50, 2.0) // scale distance into a nice curve
-        let maxScrollSpeed: CGFloat = 30.00
-        let scrollSpeed = min(acceleration * 2.5, maxScrollSpeed) // scaled + capped
-
-        // Apply sensitivity multiplier with exponential scaling for values < 1.0
-        // This makes slower speeds MUCH slower but still usable
-        let adjustedSensitivity: CGFloat
-        if scrollSensitivity < 1.0 {
-            // Exponential scaling for slow speeds, but not too extreme
-            // 0.1 becomes ~0.03, 0.2 becomes ~0.08, 0.5 becomes ~0.35
-            adjustedSensitivity = CGFloat(pow(scrollSensitivity, 1.5))
+        let targetVelocity: AutoscrollVelocity
+        if session.mode == .initial {
+            targetVelocity = .zero
         } else {
-            // Linear scaling for faster speeds
-            adjustedSensitivity = CGFloat(scrollSensitivity)
+            targetVelocity = AutoscrollBehavior.velocity(
+                anchorPoint: session.anchorPoint,
+                currentPoint: currentPoint,
+                sensitivity: scrollSensitivity,
+                invertVertical: isDirectionInverted,
+                axes: AutoscrollAxes(
+                    horizontal: session.canScrollHorizontally,
+                    vertical: session.canScrollVertically
+                )
+            )
         }
-        
-        let finalAmount = direction * scrollSpeed * adjustedSensitivity
 
-        // Dynamic threshold based on sensitivity - allow very slow scrolling at low sensitivities
-        let threshold = min(0.1, adjustedSensitivity * 0.5)
-        if abs(finalAmount) < threshold {
-            return // don't scroll unless meaningful
-        }
-
-        if let scrollEvent = CGEvent(scrollWheelEvent2Source: nil,
-                                    units: .pixel,
-                                    wheelCount: 1,
-                                    wheel1: Int32(finalAmount),
-                                    wheel2: 0,
-                                    wheel3: 0) {
-            scrollEvent.flags = .maskNonCoalesced
-            scrollEvent.post(tap: .cgSessionEventTap)
-        }
-    }
-
-    @objc func toggleTrackpadMode() {
-        if isAutoScrolling {
-            stopAutoScroll()
-        } else {
-            startTrackpadAutoScroll()
-        }
-    }
-
-    func startTrackpadAutoScroll() {
-        stopAutoScroll() // Clear any existing state
-        
-        isTrackpadMode = true
-        originalPoint = NSEvent.mouseLocation
-        isAutoScrolling = true
-        
-        // Show custom cursor
-        NSCursor.hide()
-        scrollCursor?.set()
-        
-        // Start timer for scrolling
-        scrollTimer = Timer.scheduledTimer(withTimeInterval: 0.01, repeats: true) { [weak self] _ in
-            self?.performScroll()
-            self?.scrollCursor?.set() // keep forcing cursor
-        }
-        RunLoop.current.add(scrollTimer!, forMode: .common)
-        
-        // Show feedback to user
-        showTrackpadModeNotification()
-    }
-
-    func showTrackpadModeNotification() {
-        let content = UNMutableNotificationContent()
-        content.title = "Auto-Scroll Active"
-        content.body = "Move cursor to control scrolling. Click anywhere to exit."
-        content.sound = UNNotificationSound.default
-        
-        let request = UNNotificationRequest(
-            identifier: "com.scrollapp.trackpadmode",
-            content: content,
-            trigger: nil  // Deliver immediately
+        session.velocity = AutoscrollBehavior.smoothedVelocity(
+            previous: session.velocity,
+            target: targetVelocity
         )
-        
-        UNUserNotificationCenter.current().add(request) { error in
-            if let error = error {
-                print("Error showing notification: \(error.localizedDescription)")
-            }
+        updateSessionStateStatus(
+            String(
+                format: "mode=%@ buttonDown=%@ dx=%.0f dy=%.0f",
+                String(describing: session.mode) as NSString,
+                activationButtonIsDown ? "Y" : "N",
+                currentPoint.x - session.anchorPoint.x,
+                currentPoint.y - session.anchorPoint.y
+            )
+        )
+        updateScrollEmissionStatus(
+            String(
+                format: "mode=%@ vx=%.1f vy=%.1f",
+                String(describing: session.mode) as NSString,
+                session.velocity.horizontal,
+                session.velocity.vertical
+            )
+        )
+
+        activeSession = session
+        updateIndicator(for: session)
+
+        guard AutoscrollBehavior.shouldEmitScroll(session.velocity) else {
+            updateScrollDeliveryStatus("idle (inside dead zone)")
+            return
         }
+
+        let horizontalAmount = session.canScrollHorizontally ? Int32(session.velocity.horizontal.rounded()) : 0
+        let verticalAmount = session.canScrollVertically ? Int32(session.velocity.vertical.rounded()) : 0
+        guard horizontalAmount != 0 || verticalAmount != 0 else {
+            updateScrollDeliveryStatus("idle (rounded to zero)")
+            return
+        }
+
+        if let scrollEvent = CGEvent(
+            scrollWheelEvent2Source: nil,
+            units: .pixel,
+            wheelCount: 2,
+            wheel1: verticalAmount,
+            wheel2: horizontalAmount,
+            wheel3: 0
+        ) {
+            scrollEvent.flags = forwardedModifierFlags()
+            scrollEvent.setIntegerValueField(.eventSourceUserData, value: syntheticScrollUserData)
+            scrollEvent.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+            scrollEvent.setIntegerValueField(.scrollWheelEventDeltaAxis1, value: Int64(verticalAmount))
+            scrollEvent.setIntegerValueField(.scrollWheelEventDeltaAxis2, value: Int64(horizontalAmount))
+            scrollEvent.setIntegerValueField(.scrollWheelEventPointDeltaAxis1, value: Int64(verticalAmount))
+            scrollEvent.setIntegerValueField(.scrollWheelEventPointDeltaAxis2, value: Int64(horizontalAmount))
+
+            deliverScrollEvent(
+                scrollEvent,
+                session: session,
+                horizontalAmount: horizontalAmount,
+                verticalAmount: verticalAmount
+            )
+        } else {
+            updateScrollDeliveryStatus("failed to create CGEvent")
+        }
+    }
+
+    func forwardedModifierFlags() -> CGEventFlags {
+        let supported: CGEventFlags = [.maskCommand, .maskShift, .maskControl, .maskAlternate, .maskSecondaryFn, .maskNonCoalesced]
+        return lastObservedFlags.intersection(supported).union(.maskNonCoalesced)
     }
 
     @objc func sensitivityChanged(_ sender: NSSlider) {
         scrollSensitivity = sender.doubleValue
         UserDefaults.standard.set(scrollSensitivity, forKey: "scrollSensitivity")
-        
-        // Update the label and menu item title
+
         if let sensitivityItem = statusItem.menu?.items.first(where: { $0.title.starts(with: "Scroll Speed") }) {
             sensitivityItem.title = String(format: "Scroll Speed: %.1fx", scrollSensitivity)
-            
             if let view = sensitivityItem.view,
                let label = view.viewWithTag(100) as? NSTextField {
                 label.stringValue = String(format: "%.1fx", scrollSensitivity)
             }
         }
     }
-    
-    @objc func selectActivationMethod(_ sender: NSMenuItem) {
-        guard let method = sender.representedObject as? ActivationMethod else { return }
-        
-        activationMethod = method
-        UserDefaults.standard.set(method.rawValue, forKey: "activationMethod")
-        
-        // Update menu item states
-        if let activationItem = statusItem.menu?.items.first(where: { $0.title == "Activation Method" }),
-           let submenu = activationItem.submenu {
-            for item in submenu.items {
-                item.state = (item.representedObject as? ActivationMethod == method) ? .on : .off
-            }
-        }
-        
-        // Restart mouse listeners with new configuration
-        setupMiddleClickListeners()
-    }
 
     @objc func showAbout() {
         let alert = NSAlert()
         alert.messageText = "About Scrollapp"
-        
-        alert.informativeText = "Scrollapp enables auto-scrolling on macOS.\n\nHow to activate:\n• Mouse: Configurable button/modifier (see Activation Method in menu)\n• Trackpad: Hold Option key and scroll with two fingers\n• Menu: Use the menu bar icon and select 'Start/Stop Auto-Scroll'\n\nHow to stop:\n• Click anywhere to exit auto-scroll mode\n• Use your configured activation method again\n\nWhile active, move your cursor to control scroll speed and direction.\n\nAdjust scroll speed using the slider in the menu bar (0.2x - 3.0x).\nSpeeds below 1.0x are exponentially slower for fine control.\n\nConfigure your preferred activation method in the 'Activation Method' submenu to avoid conflicts with browser link opening."
+        alert.informativeText = "Scrollapp enables Windows-style auto-scrolling on macOS.\n\nHow to activate:\n• Mouse: Middle click on plain scrollable content\n\nWhile active, move the pointer to control speed and direction.\nHolding Command while autoscroll is running forwards Command+Scroll so apps can zoom instead of plain-scroll when they support it."
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
         alert.runModal()
@@ -447,136 +819,383 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func stopAutoScroll() {
         scrollTimer?.invalidate()
         scrollTimer = nil
-        NSCursor.unhide()
+        hideIndicator()
         isAutoScrolling = false
-        isTrackpadMode = false
-        originalPoint = nil
+        activeSession = nil
+        activationButtonIsDown = false
+        updateSessionStateStatus("inactive")
     }
 
-    func setupTrackpadActivation() {
-        // Detect Option key via flagsChanged
-        optionKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-            guard let self = self else { return }
-            
-            // Detect Option key
-            let optionKeyFlag = NSEvent.ModifierFlags.option
-            
-            // If Option key is pressed and we're not already scrolling
-            if event.modifierFlags.contains(optionKeyFlag) && !self.isAutoScrolling {
-                // Start a timer to detect if two-finger scroll happens while Option is pressed
-                self.lastScrollTime = Date()
-                
-                // If we detect a scroll within 1 second of Option press, activate auto-scroll
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-                    self?.lastScrollTime = nil
-                }
+    func updateIndicator(for session: AutoscrollSession) {
+        if indicatorPanel == nil {
+            let size = NSSize(width: 20, height: 20)
+            let anchorPoint = session.anchorPoint
+            let origin = CGPoint(
+                x: anchorPoint.x - size.width / 2,
+                y: anchorPoint.y - size.height / 2
+            )
+            let panel = NSPanel(
+                contentRect: NSRect(origin: origin, size: size),
+                styleMask: [.borderless, .nonactivatingPanel],
+                backing: .buffered,
+                defer: false
+            )
+            panel.isReleasedWhenClosed = false
+            panel.level = .floating
+            panel.backgroundColor = .clear
+            panel.isOpaque = false
+            panel.hasShadow = false
+            panel.ignoresMouseEvents = true
+            panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+
+            let view = AutoscrollIndicatorView(frame: NSRect(origin: .zero, size: size))
+            panel.contentView = view
+            indicatorPanel = panel
+            indicatorView = view
+            panel.orderFront(nil)
+        }
+    }
+
+    func hideIndicator() {
+        indicatorPanel?.orderOut(nil)
+        indicatorView = nil
+        indicatorPanel = nil
+    }
+
+    func currentEventLocation() -> CGPoint {
+        NSEvent.mouseLocation
+    }
+
+    func notePhysicalPointerLocationIfNeeded(for type: CGEventType, event: CGEvent) {
+        switch type {
+        case .leftMouseDown, .leftMouseUp, .mouseMoved, .leftMouseDragged,
+             .rightMouseDown, .rightMouseUp, .rightMouseDragged,
+             .otherMouseDown, .otherMouseUp, .otherMouseDragged:
+            lastPhysicalPointerLocation = event.unflippedLocation
+        default:
+            break
+        }
+    }
+
+    func accessibilityTargetInfo(at eventPoint: CGPoint) -> AccessibilityTargetInfo? {
+        let systemWide = AXUIElementCreateSystemWide()
+        for candidate in accessibilityPointCandidates(for: eventPoint) {
+            var hitElement: AXUIElement?
+            let result = AXUIElementCopyElementAtPosition(systemWide, Float(candidate.x), Float(candidate.y), &hitElement)
+            if result == .success, let hitElement {
+                return buildAccessibilityTargetInfo(from: hitElement)
             }
         }
-        
-        // Detect two-finger scroll while Option is pressed
-        scrollMonitor = NSEvent.addGlobalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
-            guard let self = self,
-                  let lastScrollTime = self.lastScrollTime,
-                  Date().timeIntervalSince(lastScrollTime) < 1.0,
-                  !self.isAutoScrolling,
-                  abs(event.deltaY) > 0.1 else { return }
-            
-            // Option + scroll detected, activate auto-scroll
-            self.startTrackpadAutoScroll()
-        }
-        
-        // Monitor for clicks to exit auto-scroll mode
-        clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
-            guard let self = self, self.isAutoScrolling else { return }
-            
-            // Don't stop auto-scroll for the configured activation button
-            if event.type == .otherMouseDown,
-               let activationButtonNumber = self.activationMethod.buttonNumber,
-               event.buttonNumber == activationButtonNumber {
-                return // Skip - let the activation method handler deal with it
+        return nil
+    }
+
+    func buildAccessibilityTargetInfo(from hitElement: AXUIElement) -> AccessibilityTargetInfo {
+        var info = AccessibilityTargetInfo()
+        var current: AXUIElement? = hitElement
+        var hopCount = 0
+
+        while let element = current, hopCount < 24 {
+            let role = copyAXString(element, attribute: kAXRoleAttribute)
+            let subrole = copyAXString(element, attribute: kAXSubroleAttribute)
+
+            if let role {
+                info.roles.append(role)
             }
-            
-            // For all other clicks, stop auto-scroll
-            self.stopAutoScroll()
+            if let subrole {
+                info.subroles.append(subrole)
+            }
+
+            let actionNames = copyAXStringArray(element, attribute: "AXActions")
+            if !actionNames.isEmpty {
+                info.actionNames.append(contentsOf: actionNames)
+            }
+
+            appendMetadata(into: &info.titles, value: copyAXString(element, attribute: kAXTitleAttribute))
+            appendMetadata(into: &info.helpTexts, value: copyAXString(element, attribute: kAXDescriptionAttribute))
+            appendMetadata(into: &info.helpTexts, value: copyAXString(element, attribute: kAXHelpAttribute))
+            appendMetadata(into: &info.identifiers, value: copyAXString(element, attribute: kAXIdentifierAttribute as String))
+            appendMetadata(into: &info.valueTexts, value: copyAXString(element, attribute: kAXValueAttribute))
+
+            if let pid = copyPID(for: element) {
+                info.pid = pid
+            }
+            if copyAXElement(element, attribute: kAXHorizontalScrollBarAttribute) != nil {
+                info.canScrollHorizontally = true
+            }
+            if copyAXElement(element, attribute: kAXVerticalScrollBarAttribute) != nil {
+                info.canScrollVertically = true
+            }
+
+            let actionabilityReasons = actionabilityReasons(
+                role: role,
+                subrole: subrole,
+                actionNames: actionNames,
+                element: element
+            )
+            if !actionabilityReasons.isEmpty {
+                info.actionabilityReasons.append(contentsOf: actionabilityReasons)
+            }
+
+            if isActionable(role: role, subrole: subrole) {
+                info.isActionable = true
+            }
+
+            current = copyAXElement(element, attribute: kAXParentAttribute)
+            hopCount += 1
         }
+
+        return info
+    }
+
+    func appendMetadata(into values: inout [String], value: String?) {
+        guard let trimmedValue = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmedValue.isEmpty,
+              !values.contains(trimmedValue) else {
+            return
+        }
+        values.append(trimmedValue)
+    }
+
+    func joinedMetadata(_ values: [String]) -> String? {
+        guard !values.isEmpty else {
+            return nil
+        }
+        return values.joined(separator: " ")
+    }
+
+    func accessibilityPointCandidates(for eventPoint: CGPoint) -> [CGPoint] {
+        var candidates = [eventPoint]
+        if let screen = NSScreen.screens.first(where: { $0.frame.contains(eventPoint) }) {
+            let flippedPoint = CGPoint(
+                x: eventPoint.x,
+                y: screen.frame.maxY - eventPoint.y
+            )
+            if abs(flippedPoint.y - eventPoint.y) > 0.5 {
+                candidates.append(flippedPoint)
+            }
+        }
+        return candidates
+    }
+
+    func copyAXString(_ element: AXUIElement, attribute: String) -> String? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else {
+            return nil
+        }
+        return value as? String
+    }
+
+    func copyAXStringArray(_ element: AXUIElement, attribute: String) -> [String] {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success,
+              let strings = value as? [String] else {
+            return []
+        }
+        return strings
+    }
+
+    func copyAXElement(_ element: AXUIElement, attribute: String) -> AXUIElement? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else {
+            return nil
+        }
+        guard let value else { return nil }
+        return unsafeBitCast(value, to: AXUIElement.self)
+    }
+
+    func copyPID(for element: AXUIElement) -> pid_t? {
+        var pid: pid_t = 0
+        return AXUIElementGetPid(element, &pid) == .success ? pid : nil
+    }
+
+    func isActionable(role: String?, subrole: String?) -> Bool {
+        let actionableRoles: Set<String> = [
+            "AXButton",
+            "AXCheckBox",
+            "AXDisclosureTriangle",
+            "AXLink",
+            "AXMenuBarItem",
+            "AXMenuButton",
+            "AXPopUpButton",
+            "AXRadioButton",
+            "AXSwitch",
+            "AXTab",
+            "AXToolbarButton"
+        ]
+        let actionableSubroles: Set<String> = [
+            "AXCloseButton",
+            "AXDeleteButton",
+            "AXFullScreenButton",
+            "AXMinimizeButton",
+            "AXOverflowButton",
+            "AXTabButton",
+            "AXZoomButton"
+        ]
+        return (role.map(actionableRoles.contains) ?? false) || (subrole.map(actionableSubroles.contains) ?? false)
+    }
+
+    func actionabilityReasons(
+        role: String?,
+        subrole: String?,
+        actionNames: [String],
+        element: AXUIElement
+    ) -> [String] {
+        var reasons = [String]()
+
+        if isActionable(role: role, subrole: subrole) {
+            reasons.append("role")
+        }
+
+        let actionableActions = Set(["AXPress", "AXConfirm", "AXPick"])
+        if actionNames.contains(where: actionableActions.contains) {
+            reasons.append("press")
+        }
+
+        let metadataStrings = [
+            copyAXString(element, attribute: kAXTitleAttribute),
+            copyAXString(element, attribute: kAXDescriptionAttribute),
+            copyAXString(element, attribute: kAXHelpAttribute),
+            copyAXString(element, attribute: kAXIdentifierAttribute as String),
+            copyAXString(element, attribute: kAXValueAttribute)
+        ]
+        .compactMap { $0?.lowercased() }
+
+        let actionableTokens = [
+            "tab",
+            "close",
+            "button",
+            "toolbar",
+            "link"
+        ]
+        if metadataStrings.contains(where: { value in actionableTokens.contains(where: value.contains) }) {
+            reasons.append("metadata")
+        }
+
+        return Array(Set(reasons)).sorted()
+    }
+
+    func deliverScrollEvent(
+        _ scrollEvent: CGEvent,
+        session: AutoscrollSession,
+        horizontalAmount: Int32,
+        verticalAmount: Int32
+    ) {
+        scrollEvent.post(tap: .cgSessionEventTap)
+        updateScrollDeliveryStatus("session tap live-pointer (\(horizontalAmount), \(verticalAmount))")
+    }
+
+    func preferredAxesFallback(for info: AccessibilityTargetInfo) -> AutoscrollAxes {
+        AutoscrollTargetClassifier.fallbackAxes(
+            for: AutoscrollTargetSnapshot(
+                roles: info.roles,
+                subroles: info.subroles,
+                isExplicitlyScrollable: info.canScrollHorizontally || info.canScrollVertically,
+                actions: info.actionNames,
+                title: joinedMetadata(info.titles),
+                identifier: joinedMetadata(info.identifiers),
+                helpText: joinedMetadata(info.helpTexts),
+                valueText: joinedMetadata(info.valueTexts)
+            )
+        )
+    }
+
+    @discardableResult
+    func checkPermissions(promptForMissingPermissions: Bool = true) -> RuntimePermissionStatus {
+        let accessibilityTrusted = AXIsProcessTrusted()
+        let canListenEvents = CGPreflightListenEventAccess()
+        let canPostEvents = CGPreflightPostEventAccess()
+        let status = RuntimePermissionStatus(
+            accessibilityTrusted: accessibilityTrusted,
+            canListenEvents: canListenEvents,
+            canPostEvents: canPostEvents
+        )
+        runtimePermissionStatus = status
+
+        if promptForMissingPermissions && !accessibilityTrusted {
+            let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
+            _ = AXIsProcessTrustedWithOptions([promptKey: true] as CFDictionary)
+        }
+        if promptForMissingPermissions && !canListenEvents {
+            _ = CGRequestListenEventAccess()
+        }
+        if promptForMissingPermissions && !canPostEvents {
+            _ = CGRequestPostEventAccess()
+        }
+
+        updateDiagnosticsMenu()
+
+        guard !accessibilityTrusted || !canListenEvents || !canPostEvents else {
+            return status
+        }
+
+        guard promptForMissingPermissions else {
+            return status
+        }
+
+        let alert = NSAlert()
+        alert.messageText = "Permissions Required"
+        alert.informativeText = "Scrollapp needs Accessibility, Input Monitoring, and event posting access to latch middle-click autoscroll to the original target.\n\nPlease grant the missing permissions in Privacy & Security, then restart the app if needed."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Open Accessibility")
+        alert.addButton(withTitle: "Open Input Monitoring")
+        alert.addButton(withTitle: "Skip")
+
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn,
+           let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        } else if response == .alertSecondButtonReturn,
+                  let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") {
+            NSWorkspace.shared.open(url)
+        }
+        return status
+    }
+
+    @objc func refreshPermissionsMenuSelected() {
+        refreshRuntimeDiagnostics(promptForMissingPermissions: true, retryEventTap: true)
     }
 
     @objc func toggleDirectionInversion() {
-        // Toggle the inversion state
-        isDirectionInverted = !isDirectionInverted
-        
-        // Save preference
+        isDirectionInverted.toggle()
         UserDefaults.standard.set(isDirectionInverted, forKey: "invertScrollDirection")
-        
-        // Update menu item state
         if let menu = statusItem.menu,
            let invertItem = menu.items.first(where: { $0.action == #selector(toggleDirectionInversion) }) {
             invertItem.state = isDirectionInverted ? .on : .off
         }
-        
-        // No notification - removed
     }
 
     @objc func toggleLaunchAtLogin() {
-        launchAtLogin = !launchAtLogin
+        launchAtLogin.toggle()
         UserDefaults.standard.set(launchAtLogin, forKey: "launchAtLogin")
         updateLoginItemState()
-        
-        // Update menu item state
         if let launchItem = statusItem.menu?.items.first(where: { $0.title == "Launch at Login" }) {
             launchItem.state = launchAtLogin ? .on : .off
         }
     }
 
     func updateLoginItemState() {
+        guard !isAutomatedTestMode else {
+            return
+        }
+
         if #available(macOS 13.0, *) {
-            // Use the newer ServiceManagement API for macOS 13+
             let service = SMAppService.mainApp
             do {
                 if launchAtLogin {
                     if service.status != .enabled {
                         try service.register()
                     }
-                } else {
-                    if service.status == .enabled {
-                        try service.unregister()
-                    }
+                } else if service.status == .enabled {
+                    try service.unregister()
                 }
             } catch {
                 print("Failed to update login item: \(error.localizedDescription)")
             }
-        } else {
-            // Use the older SMLoginItemSetEnabled API for macOS 11.0-12.x
-            if let bundleIdentifier = Bundle.main.bundleIdentifier {
-                let success = SMLoginItemSetEnabled(bundleIdentifier as CFString, launchAtLogin)
-                if !success {
-                    print("Failed to update login item using legacy API")
-                }
+        } else if let bundleIdentifier = Bundle.main.bundleIdentifier {
+            let success = SMLoginItemSetEnabled(bundleIdentifier as CFString, launchAtLogin)
+            if !success {
+                print("Failed to update login item using legacy API")
             }
-        }
-    }
-    
-    func checkAccessibilityPermissions() {
-        // Check if we have Accessibility permissions
-        let trusted = AXIsProcessTrusted()
-        
-        if !trusted {
-            // Show alert asking user to grant permissions
-            let alert = NSAlert()
-            alert.messageText = "Accessibility Permissions Required"
-            alert.informativeText = "Scrollapp needs Accessibility permissions to enable auto-scrolling.\n\nPlease:\n1. Click 'Open System Preferences'\n2. Unlock the settings if needed\n3. Check the box next to Scrollapp\n4. Restart the app"
-            alert.alertStyle = .warning
-            alert.addButton(withTitle: "Open System Preferences")
-            alert.addButton(withTitle: "Skip")
-            
-            let response = alert.runModal()
-            
-            if response == .alertFirstButtonReturn {
-                // Open Accessibility preferences
-                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-                    NSWorkspace.shared.open(url)
-                        }
-                    }
         }
     }
 }

@@ -85,7 +85,3 @@ struct HowToUseRow: View {
         }
     }
 }
-
-#Preview {
-    ContentView()
-}
