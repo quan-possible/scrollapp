@@ -59,6 +59,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         var scrollOwnerFrame: CGRect?
     }
 
+    struct ScrollOwnerCandidate: Equatable {
+        var role: String?
+        var subrole: String?
+        var frame: CGRect?
+        var hasHorizontalScrollBar: Bool
+        var hasVerticalScrollBar: Bool
+        var hopCount: Int
+    }
+
     struct RuntimePermissionStatus {
         var accessibilityTrusted = false
         var canListenEvents = false
@@ -955,6 +964,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         var leafRole: String?
         var leafSubrole: String?
         var leafFrame: CGRect?
+        var bestScrollOwnerCandidate: ScrollOwnerCandidate?
 
         while let element = current, hopCount < ancestryDepthLimit {
             let role = copyAXString(element, attribute: kAXRoleAttribute)
@@ -1008,15 +1018,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                hasVerticalScrollBar {
                 info.canScrollVertically = true
             }
-            if info.scrollOwnerFrame == nil,
-               isScrollOwnerCandidate(
+            if isScrollOwnerCandidate(
                 role: role,
                 hasHorizontalScrollBar: hasHorizontalScrollBar,
                 hasVerticalScrollBar: hasVerticalScrollBar
                ) {
-                info.scrollOwnerRole = role
-                info.scrollOwnerSubrole = subrole
-                info.scrollOwnerFrame = normalizedScrollOwnerFrame(frame)
+                let candidate = ScrollOwnerCandidate(
+                    role: role,
+                    subrole: subrole,
+                    frame: normalizedScrollOwnerFrame(frame),
+                    hasHorizontalScrollBar: hasHorizontalScrollBar,
+                    hasVerticalScrollBar: hasVerticalScrollBar,
+                    hopCount: hopCount
+                )
+                if shouldPreferScrollOwnerCandidate(candidate, over: bestScrollOwnerCandidate) {
+                    bestScrollOwnerCandidate = candidate
+                }
             }
 
             if hopCount == 0 {
@@ -1036,7 +1053,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         info.actionabilityReasons = Array(Set(info.actionabilityReasons)).sorted()
-        if info.scrollOwnerFrame == nil {
+        if let bestScrollOwnerCandidate {
+            info.scrollOwnerRole = bestScrollOwnerCandidate.role
+            info.scrollOwnerSubrole = bestScrollOwnerCandidate.subrole
+            info.scrollOwnerFrame = bestScrollOwnerCandidate.frame
+        } else {
             info.scrollOwnerRole = leafRole
             info.scrollOwnerSubrole = leafSubrole
             info.scrollOwnerFrame = leafFrame
@@ -1198,6 +1219,86 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return false
         }
         return ownerRoles.contains(role)
+    }
+
+    func shouldPreferScrollOwnerCandidate(
+        _ candidate: ScrollOwnerCandidate,
+        over existing: ScrollOwnerCandidate?
+    ) -> Bool {
+        guard let existing else {
+            return true
+        }
+
+        let candidateHasExplicitScrollbars = candidate.hasHorizontalScrollBar || candidate.hasVerticalScrollBar
+        let existingHasExplicitScrollbars = existing.hasHorizontalScrollBar || existing.hasVerticalScrollBar
+        if candidateHasExplicitScrollbars != existingHasExplicitScrollbars {
+            return candidateHasExplicitScrollbars
+        }
+
+        let candidatePriority = scrollOwnerRolePriority(candidate.role)
+        let existingPriority = scrollOwnerRolePriority(existing.role)
+        if candidatePriority > existingPriority {
+            if let candidateFrame = candidate.frame,
+               let existingFrame = existing.frame,
+               substantiallyContains(candidateFrame, innerFrame: existingFrame) {
+                return true
+            }
+            return existing.frame == nil && candidate.frame != nil
+        }
+
+        if candidatePriority == existingPriority {
+            if existing.frame == nil, candidate.frame != nil {
+                return true
+            }
+            if candidateHasExplicitScrollbars,
+               let candidateFrame = candidate.frame,
+               let existingFrame = existing.frame,
+               candidateFrame.equalTo(existingFrame) == false,
+               substantiallyContains(existingFrame, innerFrame: candidateFrame) == false,
+               candidate.hopCount < existing.hopCount {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    func scrollOwnerRolePriority(_ role: String?) -> Int {
+        switch role {
+        case "AXScrollArea":
+            return 5
+        case "AXBrowser", "AXCollection", "AXList", "AXOutline", "AXTable":
+            return 4
+        case "AXWebArea":
+            return 3
+        case "AXTextArea":
+            return 2
+        default:
+            return 1
+        }
+    }
+
+    func substantiallyContains(_ outerFrame: CGRect, innerFrame: CGRect) -> Bool {
+        guard outerFrame.width > 1,
+              outerFrame.height > 1,
+              innerFrame.width > 1,
+              innerFrame.height > 1 else {
+            return false
+        }
+
+        let outerInset = max(4, min(outerFrame.width, outerFrame.height) * 0.01)
+        let expandedOuter = outerFrame.insetBy(dx: -outerInset, dy: -outerInset)
+        guard expandedOuter.contains(innerFrame) else {
+            return false
+        }
+
+        let outerArea = outerFrame.width * outerFrame.height
+        let innerArea = innerFrame.width * innerFrame.height
+        guard innerArea > 0 else {
+            return false
+        }
+
+        return outerArea >= innerArea * 1.5
     }
 
     func scrollOwner(for info: AccessibilityTargetInfo) -> AutoscrollScrollOwner? {
