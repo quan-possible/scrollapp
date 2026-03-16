@@ -48,6 +48,23 @@ The fixture is a static HTML page at `manual/autoscroll-fixture.html` with:
 
 If browser auto-open fails, the script prints both the file path and `file://` URL for manual use.
 
+### `verify_autoscroll_delivery.sh`
+Runs the focused macOS test lane that now includes observable autoscroll delivery checks.
+
+This is the strongest practical verification path when browser-driving and OS-cursor automation are off-limits. It stays inside the test host and checks that:
+- a synthetic wheel event still changes a real `NSScrollView` offset
+- `AppDelegate.deliverScrollEvent(...)` emits an observable synthetic wheel event on the current delivery path
+- the emitted event still moves a real scrollable AppKit view
+
+The script runs `xcodebuild` with `COPYFILE_DISABLE=1` so Google Drive / File Provider extended attributes do not poison the `.xctest` bundle during codesign.
+
+**Usage:**
+```bash
+./scripts/verify_autoscroll_delivery.sh
+```
+
+**Current limitation:** this lane proves real observable AppKit scroll output for the emitted event path, but it does not prove cross-app routing in the live menu bar app.
+
 ### `build_universal.sh`
 Builds a universal binary that works on both Intel and Apple Silicon Macs.
 

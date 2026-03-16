@@ -63,7 +63,7 @@ struct AutoscrollPhysics {
                 delta: pointerOffset.width,
                 scale: horizontalScale,
                 adjustedSensitivity: adjustedSensitivity,
-                invertDirection: false
+                invertDirection: true
             )
             : 0
 
@@ -180,6 +180,14 @@ enum AutoscrollTargetClassifier {
         "AXTextArea"
     ]
 
+    static let compactTextInputRoles: Set<String> = [
+        "AXTextField"
+    ]
+
+    static let compactTextInputSubroles: Set<String> = [
+        "AXSearchField"
+    ]
+
     static let genericActionNames: Set<String> = [
         "axconfirm",
         "axopen",
@@ -199,41 +207,24 @@ enum AutoscrollTargetClassifier {
     static let nearInteractiveAncestorDepthLimit = 3
 
     static func classify(_ snapshot: AutoscrollTargetSnapshot) -> AutoscrollTargetResolution {
-        if isDirectlyActionable(snapshot) {
+        if isCompactTextInputControl(snapshot) {
             return AutoscrollTargetResolution(behavior: .passThrough, fallbackAxes: .none)
         }
 
-        if snapshot.roles.contains("AXTextField") {
-            return AutoscrollTargetResolution(behavior: .undetermined, fallbackAxes: .none)
+        if isDirectlyActionable(snapshot) {
+            return AutoscrollTargetResolution(behavior: .passThrough, fallbackAxes: .none)
         }
 
         if hasNearInteractiveAncestor(snapshot) {
             return AutoscrollTargetResolution(behavior: .passThrough, fallbackAxes: .none)
         }
 
-        if hasDirectGenericActionOutsideWebContent(snapshot) {
+        if hasDirectGenericAction(snapshot) {
             return AutoscrollTargetResolution(behavior: .passThrough, fallbackAxes: .none)
         }
 
         let fallbackAxes = inferredFallbackAxes(for: snapshot)
-
-        if snapshot.isExplicitlyScrollable {
-            return AutoscrollTargetResolution(behavior: .startAutoscroll, fallbackAxes: fallbackAxes)
-        }
-
-        if snapshot.roles.contains("AXWebArea") {
-            return AutoscrollTargetResolution(behavior: .startAutoscroll, fallbackAxes: fallbackAxes)
-        }
-
-        if snapshot.roles.contains(where: strongScrollableRoles.contains) {
-            return AutoscrollTargetResolution(behavior: .startAutoscroll, fallbackAxes: fallbackAxes)
-        }
-
-        if snapshot.roles.first == "AXScrollArea" {
-            return AutoscrollTargetResolution(behavior: .undetermined, fallbackAxes: .none)
-        }
-
-        return AutoscrollTargetResolution(behavior: .undetermined, fallbackAxes: .none)
+        return AutoscrollTargetResolution(behavior: .startAutoscroll, fallbackAxes: fallbackAxes)
     }
 
     static func behavior(for snapshot: AutoscrollTargetSnapshot) -> AutoscrollTargetBehavior {
@@ -245,19 +236,15 @@ enum AutoscrollTargetClassifier {
     }
 
     private static func inferredFallbackAxes(for snapshot: AutoscrollTargetSnapshot) -> AutoscrollAxes {
-        if snapshot.roles.contains("AXTextField") {
+        if isCompactTextInputControl(snapshot) {
             return .none
         }
 
-        if snapshot.roles.contains("AXWebArea") {
-            return .both
+        if snapshot.isExplicitlyScrollable {
+            return .none
         }
 
-        if snapshot.roles.contains(where: strongScrollableRoles.contains) {
-            return AutoscrollAxes(horizontal: false, vertical: true)
-        }
-
-        return .none
+        return .both
     }
 
     static func hasGenericAction(_ snapshot: AutoscrollTargetSnapshot) -> Bool {
@@ -277,12 +264,27 @@ enum AutoscrollTargetClassifier {
         return false
     }
 
-    static func hasDirectGenericActionOutsideWebContent(_ snapshot: AutoscrollTargetSnapshot) -> Bool {
-        guard !snapshot.roles.contains("AXWebArea") else {
+    static func hasDirectGenericAction(_ snapshot: AutoscrollTargetSnapshot) -> Bool {
+        if isEditorLikeTextSurface(snapshot) {
             return false
         }
-
         return hasGenericAction(snapshot)
+    }
+
+    static func isCompactTextInputControl(_ snapshot: AutoscrollTargetSnapshot) -> Bool {
+        if snapshot.roles.contains(where: compactTextInputRoles.contains) {
+            return true
+        }
+
+        if snapshot.subroles.contains(where: compactTextInputSubroles.contains) {
+            return true
+        }
+
+        return false
+    }
+
+    static func isEditorLikeTextSurface(_ snapshot: AutoscrollTargetSnapshot) -> Bool {
+        snapshot.roles.contains("AXTextArea")
     }
 
     static func hasNearActionableAncestor(_ depth: Int?) -> Bool {

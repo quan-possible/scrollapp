@@ -1,6 +1,6 @@
 # Scrollapp Autoscroll Spec
 
-Last updated: 2026-03-13
+Last updated: 2026-03-15
 
 ## Goal
 
@@ -27,14 +27,11 @@ The app should:
 
 ### 2. Start Conditions
 
-- Autoscroll starts only when the clicked target resolves to scrollable content.
+- Autoscroll should start by default on non-interactive content.
 - Actionable UI must win over autoscroll.
-- If the target is ambiguous, the safe default is pass-through unless there is strong evidence that the target is scrollable content.
-
-Strong positive signals:
-- explicit horizontal or vertical scrollbar metadata
-- `AXWebArea` content ancestry
-- known scroll-content roles such as `AXBrowser`, `AXList`, `AXOutline`, `AXTable`, `AXTextArea`
+- If the target is ambiguous, the default should be autoscroll unless there is strong evidence that the click is meant to trigger an interaction.
+- If the clicked area cannot actually scroll, autoscroll should not start.
+- When several scroll containers are nested, the nearest real scroll owner should win.
 
 Strong pass-through signals:
 - links
@@ -43,15 +40,26 @@ Strong pass-through signals:
 - close buttons
 - toolbar controls
 - menu items
-- text input fields
+- compact text input controls such as search fields, address bars, form inputs, and other obvious input chrome
 - generic controls that expose actionable metadata such as `AXPress`, `tab`, `close`, `button`, `link`, or similar chrome semantics
+- nearby actionable or linked ancestors that strongly suggest the click is on UI chrome rather than content
+
+Strong autoscroll signals:
+- explicit horizontal or vertical scrollbar metadata
+- content ancestry such as `AXWebArea`
+- known content or container roles such as `AXBrowser`, `AXList`, `AXOutline`, `AXTable`, `AXScrollArea`
+- large editor-like text surfaces such as code editors, document editors, terminal scrollback, rich-text editors, and chat/history panes
+- generic non-interactive surfaces that do not present strong pass-through signals
 
 ### 3. Target Latching
 
 - The autoscroll session latches to the original activation point.
-- The autoscroll session should stay routed to the originally clicked host app.
-- Moving the cursor over another scrollable area must not retarget the session.
-- Nested scroll behavior should be delegated to the host app by delivering synthetic wheel events at the anchored location.
+- The autoscroll session must stay bound to the original target owner chosen at activation.
+- Moving the cursor over another scrollable area, another pane, or another app must not retarget the session.
+- Moving the cursor to another monitor or Space-visible window must not retarget the session.
+- After activation, pointer position controls only speed and direction. It must not trigger re-hit-testing or target reclassification.
+- If the original target owner becomes invalid, closes, or can no longer receive scroll input, the session should stop rather than retarget itself.
+- If the original view is replaced by navigation, tab switch, editor replacement, or a recreated pane, the session should stop rather than follow the replacement implicitly.
 
 ### 4. Session Modes
 
@@ -84,11 +92,13 @@ Rules:
 ### 6. Motion And Feel
 
 - The dead zone target is `15 px`.
+- While the pointer remains inside the dead zone, autoscroll should stay armed but idle.
 - Speed must increase continuously with distance from the anchor.
 - Small movement just outside the dead zone should scroll slowly but immediately.
 - Medium movement should produce a clearly faster cruise speed.
 - Far movement should accelerate further up to a capped maximum speed.
 - Re-centering must slow smoothly back to zero.
+- Returning to the dead zone should settle the session cleanly back to zero scroll.
 - Diagonal movement must combine axes naturally.
 - The feel should be smooth and responsive, not like dragging a scrollbar.
 - Smoothing should reduce jitter without making initial motion sluggish.
@@ -98,7 +108,11 @@ Rules:
 - Vertical-only targets should scroll vertically only.
 - Horizontal-only targets should scroll horizontally only.
 - Two-axis targets should support diagonal motion.
-- Fallback axis inference should only be used when it is strongly justified by content ancestry.
+- Unknown generic content should default to vertical scrolling.
+- Fallback axis inference should stay simple:
+  - preserve explicit AX-reported axes when available
+  - use both axes for clear two-axis content such as `AXWebArea`
+  - otherwise default to vertical only
 
 ### 8. Modifier Forwarding
 
@@ -110,8 +124,12 @@ Rules:
 - Left click stops autoscroll and is swallowed once.
 - Right click stops autoscroll but should still perform its native right-click action.
 - External wheel input stops autoscroll.
+- `Esc` stops autoscroll.
 - Triggering activation again while autoscroll is active stops or replaces the current session.
-- Losing the target app should stop autoscroll after a short grace period, not on the first transient mismatch.
+- App switching or window focus takeover should stop autoscroll rather than leaving a stale session running in the background.
+- Menus, popovers, modal dialogs, and other takeover UI on top of the original target owner should stop autoscroll.
+- If the original target owner disappears, closes, or becomes invalid, autoscroll stops.
+- Hovering another window, pane, tab, or app must never redirect the session.
 
 ### 10. Diagnostics
 
@@ -135,24 +153,36 @@ This diagnostics block is part of the product until behavior is stable.
 ### A. Content Autoscroll
 
 - Middle-clicking plain page content starts autoscroll.
+- Middle-clicking plain generic content outside `AXWebArea` should still start autoscroll unless the target is strongly interactive.
+- Middle-clicking truly non-scrollable dead content should not create a useless autoscroll session.
 - The indicator appears at the click point and stays there.
 - The cursor remains free to move.
 - Scrolling speed increases with cursor distance from the indicator.
 - A single middle click keeps autoscroll running after release unless the activation genuinely entered hold mode.
+- After activation, moving the cursor over another app or pane must not cause that other surface to start scrolling.
 
 ### B. Actionable Middle Click Pass-Through
 
 - Middle-clicking a link performs the app’s native middle-click link behavior.
 - Middle-clicking a tab or tab-close affordance performs the app’s native behavior.
 - Middle-clicking a button or toolbar control does not start autoscroll.
+- Middle-clicking a compact input control such as a search field or address bar does not start autoscroll.
 
-### C. Stop Semantics
+### C. Editor-Like Text Surfaces
+
+- Middle-clicking a large editor-like text surface should start autoscroll when it behaves as document content.
+- This includes targets such as code editors, document editors, terminal scrollback/content views, and chat/history panes.
+- These surfaces should not be excluded just because they expose text-related accessibility roles.
+
+### D. Stop Semantics
 
 - Left click exits and does not send an extra click through.
 - Right click exits and still produces a context menu or native right-click action.
 - External scroll input exits.
+- `Esc` exits.
+- Switching away from the original app/window or replacing the original target view exits.
 
-### D. Feel
+### E. Feel
 
 - The app should not require excessive cursor travel to get useful speed.
 - The initial response should feel immediate just outside the dead zone.
@@ -168,27 +198,33 @@ Run these checks before calling the job done:
 - horizontal strip
 - link
 - button
-- text field
+- compact text field
 
 2. Safari
 - plain page content
 - link
 - nested scroll region
+- start in one tab, then switch tabs; the old session should stop
 
 3. Chrome or another Chromium browser
 - plain page content
 - nested scroll region
 - tab/link behavior
 - clickable card targets such as X/Twitter posts that should open in a new tab on middle click
+- start in one tab, then move across tabs or switch tabs; the original session should not retarget and should stop if the original tab view is replaced
 
 4. Electron app such as Obsidian
 - editor/content area
 - tab close via middle click
 - tab strip non-content chrome
+- activate in one pane, then move the pointer over another pane without disengaging autoscroll; the original pane should remain the owner
+- activate in one editor pane, then open takeover UI such as a command palette or modal; autoscroll should stop
 
 5. Native macOS apps
 - Finder list
 - Xcode editor or navigator
+- Terminal content area, then move the pointer over another app; Terminal should remain the owner until stop
+- Terminal content area, then open a menu or switch away; the session should stop
 
 ## Implementation Targets
 
@@ -214,7 +250,7 @@ Run these checks before calling the job done:
 
 - actionable middle-click pass-through is still too weak for Electron-style tab chrome
 - motion origin still needs to line up perfectly with the actual activation click
-- scroll delivery should use the captured target PID when possible
+- scroll delivery is still not reliably constrained to the original latched owner
 - speed/feel still needs tuning toward a faster, smoother Windows-like response
 - the indicator still needs a smaller monochrome redesign
 
@@ -222,4 +258,6 @@ Run these checks before calling the job done:
 
 - The cursor must move freely during autoscroll; it must not stay stuck in one place.
 - Toggled autoscroll must work from a normal single middle click; it must not require holding the middle button.
+- Once a session starts, the original target owner must remain fixed until stop; hover alone must never retarget scrolling.
+- The session must not survive obvious ownership changes such as tab replacement, modal takeover, app switching, or target invalidation.
 - The next verification pass should include direct browser/runtime interaction, not only source-level and smoke-test checks.

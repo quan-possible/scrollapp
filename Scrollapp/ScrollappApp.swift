@@ -41,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var runtimePermissionStatus = RuntimePermissionStatus()
     var isStatusMenuOpen = false
     var diagnosticsRefreshPending = false
+    var workspaceActivationObserver: NSObjectProtocol?
 
     struct AccessibilityTargetInfo {
         var pid: pid_t?
@@ -208,11 +209,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
 
+        beginWorkspaceActivationObservation()
         updateLoginItemState()
         refreshRuntimeDiagnostics(promptForMissingPermissions: true, retryEventTap: true)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        endWorkspaceActivationObservation()
         stopAutoScroll()
         tearDownEventTap()
     }
@@ -714,7 +717,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateScrollEmissionStatus(
             "armed @ \(Int(session.anchorPoint.x.rounded())),\(Int(session.anchorPoint.y.rounded()))"
         )
-        updateScrollDeliveryStatus("armed at latched anchor")
+        let pidDescription = session.targetPID.map { "pid=\($0)" } ?? "pid=none"
+        updateScrollDeliveryStatus("armed session tap live-pointer delivery (\(pidDescription))")
         updateSessionStateStatus("mode=initial buttonDown=Y dx=0 dy=0")
         updateStopReasonStatus("None")
         updateIndicator(for: session)
@@ -966,14 +970,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if let pid = copyPID(for: element) {
                 info.pid = pid
             }
+            let hasHorizontalScrollBar = copyAXElement(element, attribute: kAXHorizontalScrollBarAttribute) != nil
+            let hasVerticalScrollBar = copyAXElement(element, attribute: kAXVerticalScrollBarAttribute) != nil
             if !info.canScrollHorizontally,
                hopCount <= scrollProbeDepthLimit,
-               copyAXElement(element, attribute: kAXHorizontalScrollBarAttribute) != nil {
+               hasHorizontalScrollBar {
                 info.canScrollHorizontally = true
             }
             if !info.canScrollVertically,
                hopCount <= scrollProbeDepthLimit,
-               copyAXElement(element, attribute: kAXVerticalScrollBarAttribute) != nil {
+               hasVerticalScrollBar {
                 info.canScrollVertically = true
             }
 
@@ -994,7 +1000,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         info.actionabilityReasons = Array(Set(info.actionabilityReasons)).sorted()
-
         return info
     }
 
@@ -1176,11 +1181,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         horizontalAmount: Int32,
         verticalAmount: Int32
     ) {
+        if let targetPID = session.targetPID,
+           !isLatchedTargetAvailable(targetPID) {
+            updateStopReasonStatus("stopped by target loss pid=\(targetPID)")
+            stopAutoScroll()
+            return
+        }
+
         scrollEvent.post(tap: .cgSessionEventTap)
         if isStatusMenuOpen {
-            let routeDescription = session.targetPID.map { "latched pid=\($0)" } ?? "session tap"
-            updateScrollDeliveryStatus("\(routeDescription) live-pointer (\(horizontalAmount), \(verticalAmount))")
+            let routeDescription = session.targetPID.map {
+                "session tap live-pointer route (latched pid=\($0))"
+            } ?? "session tap live-pointer route (ownerless fallback)"
+            updateScrollDeliveryStatus(
+                "\(routeDescription) (\(horizontalAmount), \(verticalAmount))"
+            )
         }
+    }
+
+    func isLatchedTargetAvailable(_ targetPID: pid_t) -> Bool {
+        NSRunningApplication(processIdentifier: targetPID) != nil
+    }
+
+    func beginWorkspaceActivationObservation() {
+        guard workspaceActivationObserver == nil else {
+            return
+        }
+
+        workspaceActivationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self,
+                  self.isAutoScrolling,
+                  let session = self.activeSession,
+                  let targetPID = session.targetPID,
+                  let activatedApp = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else {
+                return
+            }
+
+            guard activatedApp.processIdentifier != targetPID else {
+                return
+            }
+
+            self.updateStopReasonStatus("stopped by app switch to pid=\(activatedApp.processIdentifier)")
+            self.stopAutoScroll()
+        }
+    }
+
+    func endWorkspaceActivationObservation() {
+        guard let workspaceActivationObserver else {
+            return
+        }
+
+        NSWorkspace.shared.notificationCenter.removeObserver(workspaceActivationObserver)
+        self.workspaceActivationObserver = nil
     }
 
     @discardableResult
