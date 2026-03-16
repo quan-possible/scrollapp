@@ -6,6 +6,13 @@ A macOS utility that brings Windows-style auto-scrolling to macOS. Middle-click 
 
 <img src="img/scrollappicon.png" width="100" alt="Scrollapp Icon">
 
+## Project Map
+
+Use these folder guides when you need a fast entry point into the codebase:
+- [`Scrollapp/README.md`](Scrollapp/README.md) for the production app architecture and runtime boundaries
+- [`ScrollappTests/README.md`](ScrollappTests/README.md) for focused core-logic regression coverage
+- [`scripts/README.md`](scripts/README.md) for build, packaging, and local Xcode helper scripts
+
 ## Features
 
 - **Auto-scrolling**: Activate with configurable mouse/key combinations, move cursor to control scrolling

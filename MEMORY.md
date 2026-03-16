@@ -1,6 +1,6 @@
 # Project Memory
 
-Last updated: 2026-03-14
+Last updated: 2026-03-15
 
 ## Current Objective
 - Restore reliable Windows-style middle-click autoscroll on macOS with the smallest generalizable implementation.
@@ -9,6 +9,11 @@ Last updated: 2026-03-14
 ## Current State
 - `Scrollapp/AutoscrollCore.swift` is the main pure-logic layer for autoscroll physics and target classification.
 - `Scrollapp/ScrollappApp.swift` owns the event tap, AX hit-testing, autoscroll session state, and synthetic wheel delivery.
+- The repo now uses folder-level `README.md` files as first-pass code maps:
+  - root `README.md`
+  - `Scrollapp/README.md`
+  - `ScrollappTests/README.md`
+  - `scripts/README.md`
 - The simplification pass removed dead UI/test surface:
   - `Scrollapp/ContentView.swift`
   - `ScrollappTests/ScrollappTests.swift`
@@ -36,6 +41,11 @@ Last updated: 2026-03-14
 - Prefer structural classification rules over metadata-heavy heuristics.
 - Do not reintroduce cursor anchoring, pointer snapping, or broad URL-based link inference without fresh runtime evidence.
 - If the next pass continues to fail in live usage, instrument the delivery/classification path rather than adding more heuristics.
+- Follow the repo `software-development` contract for substantive coding work:
+  - read the nearest README chain before deep file exploration
+  - update the relevant folder `README.md` when structure, commands, tests, or invariants change
+  - require a successful final app build before sign-off
+  - require at least one direct verification of built-app behavior rather than stopping at indirect unit evidence
 
 ## Canonical Temp Context
 - Ongoing snapshot: `tmp/autoscroll-simplify-ongoing.md`
