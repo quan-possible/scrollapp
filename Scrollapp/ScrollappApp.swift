@@ -34,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var swallowedButtons = Set<Int>()
     var lastObservedFlags: CGEventFlags = []
     var lastPhysicalPointerLocation: CGPoint?
+    var lastDeliveryPointerLocation: CGPoint?
     var isAutoScrolling = false
     var isDirectionInverted = false
     var launchAtLogin = false
@@ -41,7 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var runtimePermissionStatus = RuntimePermissionStatus()
     var isStatusMenuOpen = false
     var diagnosticsRefreshPending = false
-    var workspaceActivationObserver: NSObjectProtocol?
+    var windowIDResolver: ((CGPoint) -> CGWindowID?)?
 
     struct AccessibilityTargetInfo {
         var pid: pid_t?
@@ -53,6 +54,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         var actionabilityReasons = [String]()
         var canScrollHorizontally = false
         var canScrollVertically = false
+        var scrollOwnerRole: String?
+        var scrollOwnerSubrole: String?
+        var scrollOwnerFrame: CGRect?
     }
 
     struct RuntimePermissionStatus {
@@ -209,13 +213,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
 
-        beginWorkspaceActivationObservation()
         updateLoginItemState()
         refreshRuntimeDiagnostics(promptForMissingPermissions: true, retryEventTap: true)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        endWorkspaceActivationObservation()
         stopAutoScroll()
         tearDownEventTap()
     }
@@ -547,6 +549,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let activationPoint = event.unflippedLocation
         let deliveryPoint = event.location
         lastPhysicalPointerLocation = activationPoint
+        lastDeliveryPointerLocation = deliveryPoint
         updateLastMouseTrigger(buttonNumber: buttonNumber, location: activationPoint)
 
         if swallowedButtons.contains(buttonNumber) {
@@ -585,6 +588,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     anchorPoint: activationPoint,
                     deliveryPoint: deliveryPoint,
                     targetPID: session.targetPID,
+                    targetWindowID: session.targetWindowID,
+                    latchedScrollOwner: session.latchedScrollOwner,
                     canScrollHorizontally: session.canScrollHorizontally,
                     canScrollVertically: session.canScrollVertically,
                     activationButtonNumber: session.activationButtonNumber,
@@ -598,6 +603,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func handleOtherMouseUp(_ event: CGEvent, buttonNumber: Int) -> Unmanaged<CGEvent>? {
         lastPhysicalPointerLocation = event.unflippedLocation
+        lastDeliveryPointerLocation = event.location
         if buttonNumber == activationButtonNumber {
             activationButtonIsDown = false
         }
@@ -701,6 +707,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 anchorPoint: eventPoint,
                 deliveryPoint: eventPoint,
                 targetPID: info.pid,
+                targetWindowID: windowID(at: eventPoint),
+                latchedScrollOwner: scrollOwner(for: info),
                 canScrollHorizontally: canScrollHorizontally,
                 canScrollVertically: canScrollVertically,
                 activationButtonNumber: activationButtonNumber
@@ -718,7 +726,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             "armed @ \(Int(session.anchorPoint.x.rounded())),\(Int(session.anchorPoint.y.rounded()))"
         )
         let pidDescription = session.targetPID.map { "pid=\($0)" } ?? "pid=none"
-        updateScrollDeliveryStatus("armed session tap live-pointer delivery (\(pidDescription))")
+        let windowDescription = session.targetWindowID.map { "window=\($0)" } ?? "window=none"
+        updateScrollDeliveryStatus("armed session tap live-pointer delivery (\(pidDescription), \(windowDescription))")
         updateSessionStateStatus("mode=initial buttonDown=Y dx=0 dy=0")
         updateStopReasonStatus("None")
         updateIndicator(for: session)
@@ -733,6 +742,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard var session = activeSession else { return }
 
         let currentPoint = lastPhysicalPointerLocation ?? session.anchorPoint
+        let currentDeliveryPoint = lastDeliveryPointerLocation ?? session.deliveryPoint
+        let ownerDeliveryAllowed = ownerMatchState(for: currentDeliveryPoint, session: session)
         if activationButtonIsDown {
             session.mode = AutoscrollBehavior.transitionedMode(
                 from: session.mode,
@@ -784,6 +795,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         activeSession = session
         updateIndicator(for: session)
+
+        if !ownerDeliveryAllowed.isMatched {
+            if isStatusMenuOpen {
+                updateScrollDeliveryStatus(ownerDeliveryAllowed.statusText)
+            }
+            return
+        }
 
         guard AutoscrollBehavior.shouldEmitScroll(session.velocity) else {
             if isStatusMenuOpen {
@@ -909,6 +927,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
              .rightMouseDown, .rightMouseUp, .rightMouseDragged,
              .otherMouseDown, .otherMouseUp, .otherMouseDragged:
             lastPhysicalPointerLocation = event.unflippedLocation
+            lastDeliveryPointerLocation = event.location
         default:
             break
         }
@@ -933,11 +952,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let ancestryDepthLimit = 12
         let urlDepthLimit = 3
         let scrollProbeDepthLimit = 4
+        var leafRole: String?
+        var leafSubrole: String?
+        var leafFrame: CGRect?
 
         while let element = current, hopCount < ancestryDepthLimit {
             let role = copyAXString(element, attribute: kAXRoleAttribute)
             let subrole = copyAXString(element, attribute: kAXSubroleAttribute)
             let urlString = hopCount <= urlDepthLimit ? copyAXValueString(element, attribute: "AXURL") : nil
+            let frame = copyAXFrame(element)
 
             if let role {
                 info.roles.append(role)
@@ -949,6 +972,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let actionNames = copyAXStringArray(element, attribute: "AXActions")
             if hopCount == 0, !actionNames.isEmpty {
                 info.actionNames = actionNames
+                leafRole = role
+                leafSubrole = subrole
+                leafFrame = normalizedScrollOwnerFrame(frame)
             }
 
             if info.actionableAncestorDepth == nil,
@@ -982,6 +1008,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                hasVerticalScrollBar {
                 info.canScrollVertically = true
             }
+            if info.scrollOwnerFrame == nil,
+               isScrollOwnerCandidate(
+                role: role,
+                hasHorizontalScrollBar: hasHorizontalScrollBar,
+                hasVerticalScrollBar: hasVerticalScrollBar
+               ) {
+                info.scrollOwnerRole = role
+                info.scrollOwnerSubrole = subrole
+                info.scrollOwnerFrame = normalizedScrollOwnerFrame(frame)
+            }
 
             if hopCount == 0 {
                 let actionabilityReasons = actionabilityReasons(
@@ -1000,6 +1036,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         info.actionabilityReasons = Array(Set(info.actionabilityReasons)).sorted()
+        if info.scrollOwnerFrame == nil {
+            info.scrollOwnerRole = leafRole
+            info.scrollOwnerSubrole = leafSubrole
+            info.scrollOwnerFrame = leafFrame
+        }
         return info
     }
 
@@ -1073,9 +1114,182 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return unsafeBitCast(value, to: AXUIElement.self)
     }
 
+    func copyAXCGPoint(_ element: AXUIElement, attribute: String) -> CGPoint? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success,
+              let value else {
+            return nil
+        }
+        let axValue = unsafeBitCast(value, to: AXValue.self)
+        guard AXValueGetType(axValue) == .cgPoint else {
+            return nil
+        }
+        var point = CGPoint.zero
+        guard AXValueGetValue(axValue, .cgPoint, &point) else {
+            return nil
+        }
+        return point
+    }
+
+    func copyAXCGSize(_ element: AXUIElement, attribute: String) -> CGSize? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success,
+              let value else {
+            return nil
+        }
+        let axValue = unsafeBitCast(value, to: AXValue.self)
+        guard AXValueGetType(axValue) == .cgSize else {
+            return nil
+        }
+        var size = CGSize.zero
+        guard AXValueGetValue(axValue, .cgSize, &size) else {
+            return nil
+        }
+        return size
+    }
+
+    func copyAXFrame(_ element: AXUIElement) -> CGRect? {
+        guard let origin = copyAXCGPoint(element, attribute: kAXPositionAttribute),
+              let size = copyAXCGSize(element, attribute: kAXSizeAttribute) else {
+            return nil
+        }
+        return CGRect(origin: origin, size: size)
+    }
+
     func copyPID(for element: AXUIElement) -> pid_t? {
         var pid: pid_t = 0
         return AXUIElementGetPid(element, &pid) == .success ? pid : nil
+    }
+
+    func normalizedScrollOwnerFrame(_ frame: CGRect?) -> CGRect? {
+        guard let frame,
+              frame.width > 1,
+              frame.height > 1 else {
+            return nil
+        }
+        return CGRect(
+            x: frame.origin.x.rounded(),
+            y: frame.origin.y.rounded(),
+            width: frame.width.rounded(),
+            height: frame.height.rounded()
+        )
+    }
+
+    func isScrollOwnerCandidate(
+        role: String?,
+        hasHorizontalScrollBar: Bool,
+        hasVerticalScrollBar: Bool
+    ) -> Bool {
+        if hasHorizontalScrollBar || hasVerticalScrollBar {
+            return true
+        }
+
+        let ownerRoles: Set<String> = [
+            "AXBrowser",
+            "AXCollection",
+            "AXList",
+            "AXOutline",
+            "AXScrollArea",
+            "AXTable",
+            "AXTextArea",
+            "AXWebArea"
+        ]
+        guard let role else {
+            return false
+        }
+        return ownerRoles.contains(role)
+    }
+
+    func scrollOwner(for info: AccessibilityTargetInfo) -> AutoscrollScrollOwner? {
+        guard info.scrollOwnerRole != nil || info.scrollOwnerSubrole != nil || info.scrollOwnerFrame != nil else {
+            return nil
+        }
+        return AutoscrollScrollOwner(
+            role: info.scrollOwnerRole,
+            subrole: info.scrollOwnerSubrole,
+            frame: info.scrollOwnerFrame
+        )
+    }
+
+    func windowID(at point: CGPoint) -> CGWindowID? {
+        if let windowIDResolver {
+            return windowIDResolver(point)
+        }
+
+        guard let windowInfoList = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements],
+            kCGNullWindowID
+        ) as? [[String: Any]] else {
+            return nil
+        }
+
+        var fallbackWindowID: CGWindowID?
+        for windowInfo in windowInfoList {
+            guard let ownerPIDValue = windowInfo[kCGWindowOwnerPID as String] as? NSNumber,
+                  ownerPIDValue.int32Value != getpid(),
+                  let numberValue = windowInfo[kCGWindowNumber as String] as? NSNumber,
+                  let boundsValue = windowInfo[kCGWindowBounds as String],
+                  let boundsDictionary = boundsValue as? NSDictionary,
+                  let bounds = CGRect(dictionaryRepresentation: boundsDictionary),
+                  bounds.width > 1,
+                  bounds.height > 1,
+                  bounds.contains(point) else {
+                continue
+            }
+
+            let alpha = (windowInfo[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1
+            guard alpha > 0 else {
+                continue
+            }
+
+            let layer = (windowInfo[kCGWindowLayer as String] as? NSNumber)?.intValue ?? 0
+            if layer == 0 {
+                return CGWindowID(numberValue.uint32Value)
+            }
+            if fallbackWindowID == nil {
+                fallbackWindowID = CGWindowID(numberValue.uint32Value)
+            }
+        }
+
+        return fallbackWindowID
+    }
+
+    struct OwnerMatchState {
+        var isMatched: Bool
+        var statusText: String
+    }
+
+    func ownerMatchState(for currentPoint: CGPoint, session: AutoscrollSession) -> OwnerMatchState {
+        if let targetWindowID = session.targetWindowID {
+            guard let currentWindowID = windowID(at: currentPoint) else {
+                return OwnerMatchState(isMatched: false, statusText: "paused outside latched window")
+            }
+            guard currentWindowID == targetWindowID else {
+                return OwnerMatchState(isMatched: false, statusText: "paused on window mismatch \(currentWindowID)->\(targetWindowID)")
+            }
+        }
+
+        guard let latchedScrollOwner = session.latchedScrollOwner else {
+            return OwnerMatchState(isMatched: true, statusText: "latched owner unavailable")
+        }
+
+        if let ownerFrame = latchedScrollOwner.frame {
+            if ownerFrame.contains(currentPoint) {
+                return OwnerMatchState(isMatched: true, statusText: "within latched owner frame")
+            }
+            return OwnerMatchState(isMatched: false, statusText: "paused outside latched owner")
+        }
+
+        guard let currentInfo = accessibilityTargetInfo(at: currentPoint),
+              let currentOwner = scrollOwner(for: currentInfo) else {
+            return OwnerMatchState(isMatched: false, statusText: "paused while owner is unresolved")
+        }
+
+        if currentOwner == latchedScrollOwner {
+            return OwnerMatchState(isMatched: true, statusText: "within latched owner")
+        }
+
+        return OwnerMatchState(isMatched: false, statusText: "paused on owner mismatch")
     }
 
     func isActionable(role: String?, subrole: String?) -> Bool {
@@ -1188,6 +1402,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
 
+        let ownerMatchState = ownerMatchState(for: scrollEvent.location, session: session)
+        guard ownerMatchState.isMatched else {
+            if isStatusMenuOpen {
+                updateScrollDeliveryStatus(ownerMatchState.statusText)
+            }
+            return
+        }
+
         scrollEvent.post(tap: .cgSessionEventTap)
         if isStatusMenuOpen {
             let routeDescription = session.targetPID.map {
@@ -1201,42 +1423,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func isLatchedTargetAvailable(_ targetPID: pid_t) -> Bool {
         NSRunningApplication(processIdentifier: targetPID) != nil
-    }
-
-    func beginWorkspaceActivationObservation() {
-        guard workspaceActivationObserver == nil else {
-            return
-        }
-
-        workspaceActivationObserver = NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.didActivateApplicationNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let self,
-                  self.isAutoScrolling,
-                  let session = self.activeSession,
-                  let targetPID = session.targetPID,
-                  let activatedApp = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else {
-                return
-            }
-
-            guard activatedApp.processIdentifier != targetPID else {
-                return
-            }
-
-            self.updateStopReasonStatus("stopped by app switch to pid=\(activatedApp.processIdentifier)")
-            self.stopAutoScroll()
-        }
-    }
-
-    func endWorkspaceActivationObservation() {
-        guard let workspaceActivationObserver else {
-            return
-        }
-
-        NSWorkspace.shared.notificationCenter.removeObserver(workspaceActivationObserver)
-        self.workspaceActivationObserver = nil
     }
 
     @discardableResult

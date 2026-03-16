@@ -15,6 +15,7 @@ This folder contains the production macOS app code, bundle metadata, and bundled
 - Keep AppKit, accessibility, event tap, and other runtime side effects in `ScrollappApp.swift`.
 - When activation, classification, or scroll physics behavior changes, update `../ScrollappTests/AutoscrollCoreTests.swift` in the same task.
 - Keep runtime delivery on the live-pointer session-tap path.
+- The runtime may latch the original owner and pause delivery while the pointer is outside that owner, but it must not retarget to a different owner.
 - If a change alters runtime behavior, build assumptions, or onboarding guidance, update this README and the repo root `README.md`.
 - Do not sign off on behavior changes with unit tests alone; finish with a successful app build and a direct check of built-app behavior.
 

@@ -13,6 +13,7 @@ This folder holds focused regression tests for the pure autoscroll logic.
 - Keep global input-hook and AppKit integration checks out of this folder unless the behavior can be isolated safely.
 - Add or update tests here whenever `AutoscrollCore.swift` changes behavior, thresholds, or target-resolution rules.
 - When runtime delivery regresses, prefer observable-output harnesses such as the `NSScrollView` checks here over diagnostics-only assertions.
+- For owner-latching behavior, cover both pause/no-emission on mismatch and resume when the pointer returns to the latched owner.
 - Treat these tests as supporting evidence for core logic, not as the only final proof for runtime behavior changes.
 - The AppKit harness here is the strongest practical no-cursor lane in this repo today.
   It verifies emitted scroll events against a real `NSScrollView`, but it does not fully model cross-app OS routing in the installed menu bar app.

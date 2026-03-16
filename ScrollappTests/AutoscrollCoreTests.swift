@@ -286,6 +286,26 @@ struct AutoscrollCoreTests {
         #expect(abs(mediumMove.horizontal) > abs(shortMove.horizontal))
     }
 
+    @Test func invertDirectionToggleFlipsBothHorizontalAndVerticalAxes() {
+        let physics = AutoscrollPhysics(deadZone: 15)
+
+        let normalDirection = physics.velocity(
+            from: CGSize(width: 40, height: 40),
+            sensitivity: 1.0,
+            invertVertical: false,
+            axes: .both
+        )
+        let invertedDirection = physics.velocity(
+            from: CGSize(width: 40, height: 40),
+            sensitivity: 1.0,
+            invertVertical: true,
+            axes: .both
+        )
+
+        #expect(normalDirection.horizontal == -invertedDirection.horizontal)
+        #expect(normalDirection.vertical == -invertedDirection.vertical)
+    }
+
     @Test func modeMachineTransitionsToHoldingAfterDeadZoneCrossing() {
         let mode = AutoscrollBehavior.transitionedMode(
             from: .initial,
@@ -357,6 +377,8 @@ struct AutoscrollCoreTests {
             anchorPoint: CGPoint(x: 120, y: 120),
             deliveryPoint: CGPoint(x: 120, y: 120),
             targetPID: nil,
+            targetWindowID: nil,
+            latchedScrollOwner: nil,
             canScrollHorizontally: false,
             canScrollVertically: true,
             activationButtonNumber: 2
@@ -398,6 +420,8 @@ struct AutoscrollCoreTests {
             anchorPoint: CGPoint(x: 120, y: 120),
             deliveryPoint: CGPoint(x: 120, y: 120),
             targetPID: getpid(),
+            targetWindowID: nil,
+            latchedScrollOwner: nil,
             canScrollHorizontally: false,
             canScrollVertically: true,
             activationButtonNumber: 2
@@ -439,6 +463,8 @@ struct AutoscrollCoreTests {
             anchorPoint: CGPoint(x: 120, y: 120),
             deliveryPoint: CGPoint(x: 120, y: 120),
             targetPID: getpid(),
+            targetWindowID: nil,
+            latchedScrollOwner: nil,
             canScrollHorizontally: true,
             canScrollVertically: false,
             activationButtonNumber: 2
@@ -469,21 +495,82 @@ struct AutoscrollCoreTests {
     }
 
     @MainActor
-    @Test func livePointerDeliveryTargetsHoveredPaneInSplitView() throws {
+    @Test func sameOwnerEmitsAndScrollsRealNSScrollView() throws {
         guard let capture = try? ScrollEventCapture() else {
             return
         }
         defer { capture.stop() }
 
         let delegate = AppDelegate()
+        delegate.windowIDResolver = { _ in 11 }
         let session = AutoscrollSession(
             anchorPoint: CGPoint(x: 80, y: 120),
             deliveryPoint: CGPoint(x: 80, y: 120),
             targetPID: nil,
+            targetWindowID: 11,
+            latchedScrollOwner: AutoscrollScrollOwner(
+                role: "AXScrollArea",
+                subrole: nil,
+                frame: CGRect(x: 0, y: 0, width: 160, height: 240)
+            ),
             canScrollHorizontally: false,
             canScrollVertically: true,
             activationButtonNumber: 2
         )
+        guard let scrollEvent = makeScrollEvent(verticalAmount: -120) else {
+            Issue.record("Failed to create synthetic scroll event")
+            return
+        }
+
+        scrollEvent.location = CGPoint(x: 80, y: 120)
+        markAsSyntheticScroll(scrollEvent)
+        delegate.deliverScrollEvent(
+            scrollEvent,
+            session: session,
+            horizontalAmount: 0,
+            verticalAmount: -120
+        )
+
+        let deliveredEvent = try #require(capture.waitForEvent())
+        #expect(deliveredEvent.location == CGPoint(x: 80, y: 120))
+
+        let harness = SplitPaneScrollHarness()
+        let initialLeft = harness.left.verticalOffset
+        let initialRight = harness.right.verticalOffset
+        harness.apply(deliveredEvent)
+
+        #expect(harness.left.verticalOffset != initialLeft)
+        #expect(harness.right.verticalOffset == initialRight)
+    }
+
+    @MainActor
+    @Test func differentWindowEmitsNoEventAndKeepsSessionActive() throws {
+        guard let capture = try? ScrollEventCapture() else {
+            return
+        }
+        defer { capture.stop() }
+
+        let delegate = AppDelegate()
+        delegate.windowIDResolver = { point in
+            point.x < 160 ? 11 : 44
+        }
+        let session = AutoscrollSession(
+            anchorPoint: CGPoint(x: 80, y: 120),
+            deliveryPoint: CGPoint(x: 80, y: 120),
+            targetPID: nil,
+            targetWindowID: 11,
+            latchedScrollOwner: AutoscrollScrollOwner(
+                role: "AXScrollArea",
+                subrole: nil,
+                frame: CGRect(x: 0, y: 0, width: 160, height: 240)
+            ),
+            canScrollHorizontally: false,
+            canScrollVertically: true,
+            activationButtonNumber: 2
+        )
+        delegate.activeSession = session
+        delegate.isAutoScrolling = true
+
         guard let scrollEvent = makeScrollEvent(verticalAmount: -120) else {
             Issue.record("Failed to create synthetic scroll event")
             return
@@ -498,16 +585,159 @@ struct AutoscrollCoreTests {
             verticalAmount: -120
         )
 
+        #expect(capture.waitForEvent(timeout: 0.15) == nil)
+        #expect(delegate.isAutoScrolling == true)
+        let activeSession = try #require(delegate.activeSession)
+        #expect(activeSession.targetWindowID == 11)
+    }
+
+    @MainActor
+    @Test func differentPaneInSameWindowEmitsNoEventAndKeepsSessionActive() throws {
+        guard let capture = try? ScrollEventCapture() else {
+            return
+        }
+        defer { capture.stop() }
+
+        let delegate = AppDelegate()
+        delegate.windowIDResolver = { _ in 11 }
+        let session = AutoscrollSession(
+            anchorPoint: CGPoint(x: 80, y: 120),
+            deliveryPoint: CGPoint(x: 80, y: 120),
+            targetPID: nil,
+            targetWindowID: 11,
+            latchedScrollOwner: AutoscrollScrollOwner(
+                role: "AXScrollArea",
+                subrole: nil,
+                frame: CGRect(x: 0, y: 0, width: 160, height: 240)
+            ),
+            canScrollHorizontally: false,
+            canScrollVertically: true,
+            activationButtonNumber: 2
+        )
+        delegate.activeSession = session
+        delegate.isAutoScrolling = true
+
+        guard let scrollEvent = makeScrollEvent(verticalAmount: -120) else {
+            Issue.record("Failed to create synthetic scroll event")
+            return
+        }
+
+        scrollEvent.location = CGPoint(x: 260, y: 120)
+        markAsSyntheticScroll(scrollEvent)
+        delegate.deliverScrollEvent(
+            scrollEvent,
+            session: session,
+            horizontalAmount: 0,
+            verticalAmount: -120
+        )
+
+        #expect(capture.waitForEvent(timeout: 0.15) == nil)
+        #expect(delegate.isAutoScrolling == true)
+        let activeSession = try #require(delegate.activeSession)
+        #expect(activeSession.latchedScrollOwner == session.latchedScrollOwner)
+    }
+
+    @MainActor
+    @Test func returnToOriginalOwnerEmitsAgainAndRealScrollingResumes() throws {
+        guard let capture = try? ScrollEventCapture() else {
+            return
+        }
+        defer { capture.stop() }
+
+        let delegate = AppDelegate()
+        delegate.windowIDResolver = { _ in 11 }
+        let session = AutoscrollSession(
+            anchorPoint: CGPoint(x: 80, y: 120),
+            deliveryPoint: CGPoint(x: 80, y: 120),
+            targetPID: nil,
+            targetWindowID: 11,
+            latchedScrollOwner: AutoscrollScrollOwner(
+                role: "AXScrollArea",
+                subrole: nil,
+                frame: CGRect(x: 0, y: 0, width: 160, height: 240)
+            ),
+            canScrollHorizontally: false,
+            canScrollVertically: true,
+            activationButtonNumber: 2
+        )
+        delegate.activeSession = session
+        delegate.isAutoScrolling = true
+
+        guard let pausedEvent = makeScrollEvent(verticalAmount: -120),
+              let resumedEvent = makeScrollEvent(verticalAmount: -120) else {
+            Issue.record("Failed to create synthetic scroll event")
+            return
+        }
+
+        pausedEvent.location = CGPoint(x: 260, y: 120)
+        markAsSyntheticScroll(pausedEvent)
+        delegate.deliverScrollEvent(
+            pausedEvent,
+            session: session,
+            horizontalAmount: 0,
+            verticalAmount: -120
+        )
+
+        #expect(capture.waitForEvent(timeout: 0.15) == nil)
+        #expect(delegate.isAutoScrolling == true)
+        #expect(delegate.activeSession != nil)
+
+        resumedEvent.location = CGPoint(x: 80, y: 120)
+        markAsSyntheticScroll(resumedEvent)
+        delegate.deliverScrollEvent(
+            resumedEvent,
+            session: session,
+            horizontalAmount: 0,
+            verticalAmount: -120
+        )
+
         let deliveredEvent = try #require(capture.waitForEvent())
-        #expect(deliveredEvent.location == CGPoint(x: 260, y: 120))
+        #expect(deliveredEvent.location == CGPoint(x: 80, y: 120))
 
         let harness = SplitPaneScrollHarness()
         let initialLeft = harness.left.verticalOffset
-        let initialRight = harness.right.verticalOffset
         harness.apply(deliveredEvent)
+        #expect(harness.left.verticalOffset != initialLeft)
+        #expect(delegate.isAutoScrolling == true)
+    }
 
-        #expect(harness.left.verticalOffset == initialLeft)
-        #expect(harness.right.verticalOffset != initialRight)
+    @MainActor
+    @Test func targetPIDLossStillStops() throws {
+        guard let capture = try? ScrollEventCapture() else {
+            return
+        }
+        defer { capture.stop() }
+
+        let delegate = AppDelegate()
+        let session = AutoscrollSession(
+            anchorPoint: CGPoint(x: 80, y: 120),
+            deliveryPoint: CGPoint(x: 80, y: 120),
+            targetPID: pid_t.max,
+            targetWindowID: nil,
+            latchedScrollOwner: nil,
+            canScrollHorizontally: false,
+            canScrollVertically: true,
+            activationButtonNumber: 2
+        )
+        delegate.activeSession = session
+        delegate.isAutoScrolling = true
+
+        guard let scrollEvent = makeScrollEvent(verticalAmount: -120) else {
+            Issue.record("Failed to create synthetic scroll event")
+            return
+        }
+
+        scrollEvent.location = CGPoint(x: 80, y: 120)
+        markAsSyntheticScroll(scrollEvent)
+        delegate.deliverScrollEvent(
+            scrollEvent,
+            session: session,
+            horizontalAmount: 0,
+            verticalAmount: -120
+        )
+
+        #expect(capture.waitForEvent(timeout: 0.15) == nil)
+        #expect(delegate.isAutoScrolling == false)
     }
 
 }

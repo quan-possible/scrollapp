@@ -63,7 +63,7 @@ struct AutoscrollPhysics {
                 delta: pointerOffset.width,
                 scale: horizontalScale,
                 adjustedSensitivity: adjustedSensitivity,
-                invertDirection: true
+                invertDirection: !invertVertical
             )
             : 0
 
@@ -330,11 +330,19 @@ struct AutoscrollSession {
     var anchorPoint: CGPoint
     var deliveryPoint: CGPoint
     var targetPID: pid_t?
+    var targetWindowID: CGWindowID?
+    var latchedScrollOwner: AutoscrollScrollOwner?
     var canScrollHorizontally: Bool
     var canScrollVertically: Bool
     var activationButtonNumber: Int
     var mode: AutoscrollMode = .initial
     var velocity: AutoscrollVelocity = .zero
+}
+
+struct AutoscrollScrollOwner: Equatable {
+    var role: String?
+    var subrole: String?
+    var frame: CGRect?
 }
 
 enum AutoscrollActivationDisposition {
