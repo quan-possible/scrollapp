@@ -51,12 +51,12 @@ If browser auto-open fails, the script prints both the file path and `file://` U
 ### `verify_autoscroll_delivery.sh`
 Runs the focused macOS test lane that now includes observable autoscroll delivery checks.
 
-This is the strongest practical verification path when browser-driving and OS-cursor automation are off-limits. It stays inside the test host and checks that:
+This is the strongest practical verification path that stays inside the test host. It checks that:
 - a synthetic wheel event still changes a real `NSScrollView` offset
 - `AppDelegate.deliverScrollEvent(...)` emits an observable synthetic wheel event on the current delivery path
 - the emitted event still moves a real scrollable AppKit view
 
-The script runs `xcodebuild` with `COPYFILE_DISABLE=1` so Google Drive / File Provider extended attributes do not poison the `.xctest` bundle during codesign.
+The script runs `xcodebuild` with `COPYFILE_DISABLE=1` and a `/private/tmp` derived-data path so Google Drive / File Provider extended attributes do not poison the `.xctest` bundle during codesign.
 
 **Usage:**
 ```bash
@@ -64,6 +64,25 @@ The script runs `xcodebuild` with `COPYFILE_DISABLE=1` so Google Drive / File Pr
 ```
 
 **Current limitation:** this lane proves real observable AppKit scroll output for the emitted event path, but it does not prove cross-app routing in the live menu bar app.
+
+### `verify_autoscroll_external_no_cursor.sh`
+Runs the strongest realistic no-cursor verification lane for autoscroll delivery.
+
+This script builds the app, refreshes `/Applications/Scrollapp.app`, launches the built menu bar app in a verification-only command mode, opens a separate temporary AppKit fixture window with a real `NSScrollView`, and drives the live `performScroll()` path against that external target without warping or stealing the system cursor.
+
+It verifies that:
+- the built app can latch a real external scroll target
+- the runtime session-tap delivery path emits observable scrolling into another process
+- the external fixture's scroll offset actually changes
+
+**Usage:**
+```bash
+./scripts/verify_autoscroll_external_no_cursor.sh
+```
+
+**Notes:**
+- This is the strongest practical verification lane in the repo when cursor takeover is not allowed.
+- The helper fixture reports both physical pointer coordinates and Quartz delivery coordinates because the runtime uses both during activation and delivery.
 
 ### `build_universal.sh`
 Builds a universal binary that works on both Intel and Apple Silicon Macs.

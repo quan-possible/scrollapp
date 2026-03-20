@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
-DERIVED_DATA_PATH="$REPO_ROOT/tmp/dd-autoscroll-delivery-verify"
+DERIVED_DATA_PATH="/private/tmp/scrollapp-dd-autoscroll-delivery-verify"
 
 cd "$REPO_ROOT"
 

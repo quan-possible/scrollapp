@@ -21,6 +21,7 @@ struct ScrollappApp: App {
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let syntheticScrollUserData: Int64 = 0x5352434C
+    private let verificationCommandNotification = Notification.Name("com.fromis9.scrollapp.verification.command")
 
     var statusItem: NSStatusItem!
     var diagnosticsMenuItems = [RuntimeDiagnosticItem: NSMenuItem]()
@@ -43,6 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var isStatusMenuOpen = false
     var diagnosticsRefreshPending = false
     var windowIDResolver: ((CGPoint) -> CGWindowID?)?
+    var verificationObserver: NSObjectProtocol?
 
     struct AccessibilityTargetInfo {
         var pid: pid_t?
@@ -198,6 +200,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return environment["XCTestConfigurationFilePath"] != nil
     }
 
+    var isVerificationMode: Bool {
+        let environment = ProcessInfo.processInfo.environment
+        let arguments = ProcessInfo.processInfo.arguments
+        return isEnabledTestEnvironmentValue(environment["SCROLLAPP_VERIFICATION_MODE"])
+            || arguments.contains("--scrollapp-verification-mode")
+    }
+
+    var verificationSessionIdentifier: String? {
+        let environment = ProcessInfo.processInfo.environment
+        let value = verificationArgumentValue(named: "--scrollapp-verification-session")
+            ?? environment["SCROLLAPP_VERIFICATION_SESSION"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let value, !value.isEmpty else {
+            return nil
+        }
+        return value
+    }
+
+    var verificationStatusFileURL: URL? {
+        let environment = ProcessInfo.processInfo.environment
+        let value = verificationArgumentValue(named: "--scrollapp-verification-status-file")
+            ?? environment["SCROLLAPP_VERIFICATION_STATUS_FILE"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let value, !value.isEmpty else {
+            return nil
+        }
+        return URL(fileURLWithPath: value)
+    }
+
     func isEnabledTestEnvironmentValue(_ value: String?) -> Bool {
         guard let rawValue = value?.trimmingCharacters(in: .whitespacesAndNewlines),
               !rawValue.isEmpty else {
@@ -206,6 +237,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let normalized = rawValue.lowercased()
         return normalized != "0" && normalized != "false" && normalized != "no"
+    }
+
+    func verificationArgumentValue(named flag: String) -> String? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: flag),
+              arguments.indices.contains(arguments.index(after: index)) else {
+            return nil
+        }
+        return arguments[arguments.index(after: index)]
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -218,6 +258,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         setupMenuBar()
 
+        if isVerificationMode {
+            checkPermissions(promptForMissingPermissions: false)
+            setupVerificationCommandObserver()
+            writeVerificationStatus(
+                sequence: nil,
+                command: "ready",
+                ok: true,
+                message: "verification command observer ready"
+            )
+            return
+        }
+
         guard !isAutomatedTestMode else {
             return
         }
@@ -227,8 +279,193 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        tearDownVerificationCommandObserver()
         stopAutoScroll()
         tearDownEventTap()
+    }
+
+    func setupVerificationCommandObserver() {
+        guard verificationObserver == nil,
+              let verificationSessionIdentifier else {
+            return
+        }
+
+        verificationObserver = DistributedNotificationCenter.default().addObserver(
+            forName: verificationCommandNotification,
+            object: verificationSessionIdentifier,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleVerificationCommand(notification)
+        }
+    }
+
+    func tearDownVerificationCommandObserver() {
+        guard let verificationObserver else {
+            return
+        }
+        DistributedNotificationCenter.default().removeObserver(verificationObserver)
+        self.verificationObserver = nil
+    }
+
+    func handleVerificationCommand(_ notification: Notification) {
+        guard let userInfo = notification.userInfo else {
+            writeVerificationStatus(
+                sequence: nil,
+                command: "unknown",
+                ok: false,
+                message: "missing verification command payload"
+            )
+            return
+        }
+
+        let sequence = userInfo["sequence"] as? Int
+        let command = (userInfo["command"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "unknown"
+
+        switch command {
+        case "activate_toggle":
+            guard let physicalPoint = verificationPoint(xKey: "physicalX", yKey: "physicalY", userInfo: userInfo),
+                  let deliveryPoint = verificationPoint(xKey: "deliveryX", yKey: "deliveryY", userInfo: userInfo) else {
+                writeVerificationStatus(sequence: sequence, command: command, ok: false, message: "missing activation point")
+                return
+            }
+            let started = activateVerificationToggle(physicalPoint: physicalPoint, deliveryPoint: deliveryPoint)
+            writeVerificationStatus(
+                sequence: sequence,
+                command: command,
+                ok: started,
+                message: started ? "activated toggled autoscroll session" : "failed to activate autoscroll session"
+            )
+        case "set_pointer":
+            guard let physicalPoint = verificationPoint(xKey: "physicalX", yKey: "physicalY", userInfo: userInfo),
+                  let deliveryPoint = verificationPoint(xKey: "deliveryX", yKey: "deliveryY", userInfo: userInfo) else {
+                writeVerificationStatus(sequence: sequence, command: command, ok: false, message: "missing pointer sample")
+                return
+            }
+            lastPhysicalPointerLocation = physicalPoint
+            lastDeliveryPointerLocation = deliveryPoint
+            writeVerificationStatus(sequence: sequence, command: command, ok: true, message: "pointer sample updated")
+        case "perform_scroll":
+            let count = max(1, userInfo["count"] as? Int ?? 1)
+            for _ in 0..<count {
+                performScroll()
+            }
+            writeVerificationStatus(sequence: sequence, command: command, ok: true, message: "performed \(count) scroll step(s)")
+        case "stop":
+            stopAutoScroll()
+            writeVerificationStatus(sequence: sequence, command: command, ok: true, message: "stopped autoscroll session")
+        case "snapshot":
+            writeVerificationStatus(sequence: sequence, command: command, ok: true, message: "snapshot")
+        default:
+            writeVerificationStatus(sequence: sequence, command: command, ok: false, message: "unknown verification command")
+        }
+    }
+
+    func verificationPoint(xKey: String, yKey: String, userInfo: [AnyHashable: Any]) -> CGPoint? {
+        guard let x = verificationDoubleValue(userInfo[xKey]),
+              let y = verificationDoubleValue(userInfo[yKey]) else {
+            return nil
+        }
+        return CGPoint(x: x, y: y)
+    }
+
+    func verificationDoubleValue(_ value: Any?) -> CGFloat? {
+        switch value {
+        case let number as NSNumber:
+            return CGFloat(number.doubleValue)
+        case let string as String:
+            guard let parsed = Double(string.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+                return nil
+            }
+            return CGFloat(parsed)
+        default:
+            return nil
+        }
+    }
+
+    func activateVerificationToggle(physicalPoint: CGPoint, deliveryPoint: CGPoint) -> Bool {
+        lastPhysicalPointerLocation = physicalPoint
+        lastDeliveryPointerLocation = deliveryPoint
+        activationButtonIsDown = true
+
+        let startedSession: AutoscrollSession
+        switch classifyActivation(at: deliveryPoint) {
+        case .passThrough:
+            activationButtonIsDown = false
+            return false
+        case .start(let session):
+            startedSession = session
+        }
+
+        startAutoScroll(
+            with: AutoscrollSession(
+                anchorPoint: physicalPoint,
+                deliveryPoint: deliveryPoint,
+                targetPID: startedSession.targetPID,
+                targetWindowID: startedSession.targetWindowID,
+                latchedScrollOwner: startedSession.latchedScrollOwner,
+                canScrollHorizontally: startedSession.canScrollHorizontally,
+                canScrollVertically: startedSession.canScrollVertically,
+                activationButtonNumber: startedSession.activationButtonNumber,
+                mode: startedSession.mode,
+                velocity: startedSession.velocity
+            )
+        )
+        activationButtonIsDown = false
+
+        guard var session = activeSession else {
+            return false
+        }
+
+        session.mode = AutoscrollBehavior.transitionedMode(
+            from: session.mode,
+            anchorPoint: session.anchorPoint,
+            currentPoint: physicalPoint,
+            activationButtonIsDown: false
+        )
+        activeSession = session
+        updateSessionStateStatus("mode=\(String(describing: session.mode)) buttonDown=N")
+        return session.mode != .inactive
+    }
+
+    func writeVerificationStatus(
+        sequence: Int?,
+        command: String,
+        ok: Bool,
+        message: String
+    ) {
+        guard let verificationStatusFileURL else {
+            return
+        }
+
+        let sessionMode = activeSession.map { String(describing: $0.mode) } ?? "nil"
+        let payload: [String: Any] = [
+            "ready": true,
+            "pid": getpid(),
+            "sequence": sequence ?? NSNull(),
+            "command": command,
+            "ok": ok,
+            "message": message,
+            "isAutoScrolling": isAutoScrolling,
+            "sessionMode": sessionMode,
+            "sessionState": diagnosticsState[.sessionState] ?? RuntimeDiagnosticItem.sessionState.placeholderTitle,
+            "scrollEmission": diagnosticsState[.scrollEmission] ?? RuntimeDiagnosticItem.scrollEmission.placeholderTitle,
+            "scrollDelivery": diagnosticsState[.scrollDelivery] ?? RuntimeDiagnosticItem.scrollDelivery.placeholderTitle,
+            "stopReason": diagnosticsState[.stopReason] ?? RuntimeDiagnosticItem.stopReason.placeholderTitle,
+            "activationDecision": diagnosticsState[.activationDecision] ?? RuntimeDiagnosticItem.activationDecision.placeholderTitle,
+            "axHitTest": diagnosticsState[.axHitTest] ?? RuntimeDiagnosticItem.axHitTest.placeholderTitle,
+            "permissions": [
+                "accessibility": runtimePermissionStatus.accessibilityTrusted,
+                "listenEvents": runtimePermissionStatus.canListenEvents,
+                "postEvents": runtimePermissionStatus.canPostEvents
+            ]
+        ]
+
+        do {
+            let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
+            try data.write(to: verificationStatusFileURL, options: .atomic)
+        } catch {
+            NSLog("Failed to write verification status: %@", error.localizedDescription)
+        }
     }
 
     func setupMenuBar() {

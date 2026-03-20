@@ -1,6 +1,6 @@
 # Project Memory
 
-Last updated: 2026-03-15
+Last updated: 2026-03-19
 
 ## Current Objective
 - Restore reliable Windows-style middle-click autoscroll on macOS with the smallest generalizable implementation.
@@ -14,6 +14,7 @@ Last updated: 2026-03-15
   - `Scrollapp/README.md`
   - `ScrollappTests/README.md`
   - `scripts/README.md`
+- The project is now enrolled in the `codex-personal` and `codex-manager` portfolios under the registry id `scrollapp`, so manager-level status and follow-up work should load this repo directly instead of treating it as out-of-band app work.
 - The simplification pass removed dead UI/test surface:
   - `Scrollapp/ContentView.swift`
   - `ScrollappTests/ScrollappTests.swift`
@@ -47,8 +48,9 @@ Last updated: 2026-03-15
   - require a successful final app build before sign-off
   - require at least one direct verification of built-app behavior rather than stopping at indirect unit evidence
 
-## Canonical Temp Context
-- Ongoing snapshot: `tmp/autoscroll-simplify-ongoing.md`
+## Canonical Job Context
+- Active ongoing snapshot: none
+- Completed job records live under `docs/jobs/archive/`
 
 ## Important Constraints
 - Do not revert unrelated working tree changes.
