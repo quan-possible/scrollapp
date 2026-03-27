@@ -5,302 +5,76 @@ import Testing
 
 struct AutoscrollCoreTests {
 
-    @Test func classifierPassesThroughLinks() {
-        let behavior = AutoscrollTargetClassifier.behavior(
-            for: AutoscrollTargetSnapshot(
+    @Test func classifierPassesThroughInteractiveTargets() {
+        let targets: [AutoscrollTargetSnapshot] = [
+            AutoscrollTargetSnapshot(
                 roles: ["AXLink", "AXWebArea"],
                 subroles: [],
                 isExplicitlyScrollable: true
-            )
-        )
-
-        #expect(behavior == .passThrough)
-    }
-
-    @Test func classifierPassesThroughDirectGenericActionOutsideWebContent() {
-        let behavior = AutoscrollTargetClassifier.behavior(
-            for: AutoscrollTargetSnapshot(
+            ),
+            AutoscrollTargetSnapshot(
                 roles: ["AXGroup"],
                 subroles: [],
                 isExplicitlyScrollable: false,
                 actions: ["AXPress"]
-            )
-        )
-
-        #expect(behavior == .passThrough)
-    }
-
-    @Test func classifierPassesThroughDirectGenericActionInsideWebContent() {
-        let behavior = AutoscrollTargetClassifier.behavior(
-            for: AutoscrollTargetSnapshot(
-                roles: ["AXGroup", "AXWebArea"],
-                subroles: [],
-                isExplicitlyScrollable: false,
-                actions: ["AXPress"]
-            )
-        )
-
-        #expect(behavior == .passThrough)
-    }
-
-    @Test func classifierPassesThroughDirectLinkedContainerInsideWebArea() {
-        let behavior = AutoscrollTargetClassifier.behavior(
-            for: AutoscrollTargetSnapshot(
-                roles: ["AXGroup", "AXWebArea"],
-                subroles: [],
-                isExplicitlyScrollable: false,
-                linkedAncestorDepth: 0
-            )
-        )
-
-        #expect(behavior == .passThrough)
-    }
-
-    @Test func classifierPassesThroughTextInsideNearbyLinkedContainer() {
-        let behavior = AutoscrollTargetClassifier.behavior(
-            for: AutoscrollTargetSnapshot(
-                roles: ["AXStaticText", "AXGroup", "AXWebArea"],
-                subroles: [],
-                isExplicitlyScrollable: false,
-                linkedAncestorDepth: 1
-            )
-        )
-
-        #expect(behavior == .passThrough)
-    }
-
-    @Test func classifierPassesThroughGroupInsideNearbyLinkedContainer() {
-        let behavior = AutoscrollTargetClassifier.behavior(
-            for: AutoscrollTargetSnapshot(
-                roles: ["AXGroup", "AXGroup", "AXWebArea"],
-                subroles: [],
-                isExplicitlyScrollable: false,
-                linkedAncestorDepth: 2
-            )
-        )
-
-        #expect(behavior == .passThrough)
-    }
-
-    @Test func classifierPassesThroughTextInsideNearbyActionableContainer() {
-        let behavior = AutoscrollTargetClassifier.behavior(
-            for: AutoscrollTargetSnapshot(
-                roles: ["AXStaticText", "AXGroup", "AXWebArea"],
-                subroles: [],
-                isExplicitlyScrollable: false,
-                actionableAncestorDepth: 1
-            )
-        )
-
-        #expect(behavior == .passThrough)
-    }
-
-    @Test func classifierStartsPlainLeafContentInsideWebArea() {
-        let behavior = AutoscrollTargetClassifier.behavior(
-            for: AutoscrollTargetSnapshot(
-                roles: ["AXStaticText", "AXGroup", "AXWebArea"],
-                subroles: [],
-                isExplicitlyScrollable: false
-            )
-        )
-
-        #expect(behavior == .startAutoscroll)
-    }
-
-    @Test func classifierStartsPlainGroupContentInsideWebArea() {
-        let behavior = AutoscrollTargetClassifier.behavior(
-            for: AutoscrollTargetSnapshot(
-                roles: ["AXGroup", "AXWebArea"],
-                subroles: [],
-                isExplicitlyScrollable: false
-            )
-        )
-
-        #expect(behavior == .startAutoscroll)
-    }
-
-    @Test func classifierStartsPlainGroupContentOutsideWebArea() {
-        let behavior = AutoscrollTargetClassifier.behavior(
-            for: AutoscrollTargetSnapshot(
-                roles: ["AXGroup"],
-                subroles: [],
-                isExplicitlyScrollable: false
-            )
-        )
-
-        #expect(behavior == .startAutoscroll)
-    }
-
-    @Test func classifierUsesBidirectionalFallbackAxesForPlainGroupOutsideWebArea() {
-        let axes = AutoscrollTargetClassifier.fallbackAxes(
-            for: AutoscrollTargetSnapshot(
-                roles: ["AXGroup"],
-                subroles: [],
-                isExplicitlyScrollable: false
-            )
-        )
-
-        #expect(axes == .both)
-    }
-
-    @Test func classifierIgnoresDistantLinkedAncestorInsideWebArea() {
-        let behavior = AutoscrollTargetClassifier.behavior(
-            for: AutoscrollTargetSnapshot(
-                roles: ["AXStaticText", "AXGroup", "AXGroup", "AXWebArea"],
-                subroles: [],
-                isExplicitlyScrollable: false,
-                linkedAncestorDepth: 5
-            )
-        )
-
-        #expect(behavior == .startAutoscroll)
-    }
-
-    @Test func classifierPassesThroughCompactTextFieldInsideWebArea() {
-        let behavior = AutoscrollTargetClassifier.behavior(
-            for: AutoscrollTargetSnapshot(
+            ),
+            AutoscrollTargetSnapshot(
                 roles: ["AXTextField", "AXWebArea"],
                 subroles: [],
                 isExplicitlyScrollable: false
             )
-        )
+        ]
 
-        #expect(behavior == .passThrough)
+        for target in targets {
+            #expect(AutoscrollTargetClassifier.classify(target).shouldStart == false)
+        }
     }
 
-    @Test func classifierStartsEditorLikeTextArea() {
-        let behavior = AutoscrollTargetClassifier.behavior(
-            for: AutoscrollTargetSnapshot(
+    @Test func classifierStartsScrollableContent() {
+        let targets: [AutoscrollTargetSnapshot] = [
+            AutoscrollTargetSnapshot(
+                roles: ["AXGroup"],
+                subroles: [],
+                isExplicitlyScrollable: false
+            ),
+            AutoscrollTargetSnapshot(
                 roles: ["AXTextArea"],
                 subroles: [],
                 isExplicitlyScrollable: true
-            )
-        )
-
-        #expect(behavior == .startAutoscroll)
-    }
-
-    @Test func classifierStartsEditorLikeTextAreaEvenWithGenericAction() {
-        let behavior = AutoscrollTargetClassifier.behavior(
-            for: AutoscrollTargetSnapshot(
-                roles: ["AXTextArea"],
-                subroles: [],
-                isExplicitlyScrollable: false,
-                actions: ["AXPress"]
-            )
-        )
-
-        #expect(behavior == .startAutoscroll)
-    }
-
-    @Test func classifierStartsScrollAreaTargets() {
-        let behavior = AutoscrollTargetClassifier.behavior(
-            for: AutoscrollTargetSnapshot(
+            ),
+            AutoscrollTargetSnapshot(
                 roles: ["AXScrollArea"],
                 subroles: [],
                 isExplicitlyScrollable: false
             )
-        )
+        ]
 
-        #expect(behavior == .startAutoscroll)
+        for target in targets {
+            #expect(AutoscrollTargetClassifier.classify(target).shouldStart)
+        }
     }
 
-    @Test func fallbackAxesUseBidirectionalFallbackForScrollArea() {
-        let axes = AutoscrollTargetClassifier.fallbackAxes(
-            for: AutoscrollTargetSnapshot(
-                roles: ["AXScrollArea"],
+    @Test func classifierUsesFallbackAxesForPlainAndScrollableTargets() {
+        let plainAxes = AutoscrollTargetClassifier.classify(
+            AutoscrollTargetSnapshot(
+                roles: ["AXGroup"],
                 subroles: [],
                 isExplicitlyScrollable: false
             )
-        )
-
-        #expect(axes == .both)
-    }
-
-    @Test func fallbackAxesUseWebAreaAncestry() {
-        let axes = AutoscrollTargetClassifier.fallbackAxes(
-            for: AutoscrollTargetSnapshot(
-                roles: ["AXStaticText", "AXGroup", "AXWebArea"],
-                subroles: [],
-                isExplicitlyScrollable: false
-            )
-        )
-
-        #expect(axes == .both)
-    }
-
-    @Test func fallbackAxesDoNotOverrideExplicitScrollAxes() {
-        let axes = AutoscrollTargetClassifier.fallbackAxes(
-            for: AutoscrollTargetSnapshot(
+        ).fallbackAxes
+        let explicitAxes = AutoscrollTargetClassifier.classify(
+            AutoscrollTargetSnapshot(
                 roles: ["AXGroup"],
                 subroles: [],
                 isExplicitlyScrollable: true
             )
-        )
+        ).fallbackAxes
 
-        #expect(axes == .none)
+        #expect(plainAxes == .both)
+        #expect(explicitAxes == .none)
     }
 
-    @Test func appLayerIgnoresPageLevelURLAncestorsForLinkedPassThrough() {
-        let delegate = AppDelegate()
-
-        #expect(delegate.isLinkedAncestor(role: "AXWebArea", urlString: "https://example.com") == false)
-        #expect(delegate.isLinkedAncestor(role: "AXWindow", urlString: "https://example.com") == false)
-    }
-
-    @Test func appLayerKeepsGenericURLBackedContainersLinked() {
-        let delegate = AppDelegate()
-
-        #expect(delegate.isLinkedAncestor(role: "AXGroup", urlString: "https://example.com"))
-    }
-
-    @Test func appLayerPromotesWeakTextAreaOwnerToEnclosingWebArea() {
-        let delegate = AppDelegate()
-        let smallTextArea = AppDelegate.ScrollOwnerCandidate(
-            role: "AXTextArea",
-            subrole: nil,
-            frame: CGRect(x: 100, y: 100, width: 260, height: 180),
-            hasHorizontalScrollBar: false,
-            hasVerticalScrollBar: false,
-            hopCount: 1
-        )
-        let enclosingWebArea = AppDelegate.ScrollOwnerCandidate(
-            role: "AXWebArea",
-            subrole: nil,
-            frame: CGRect(x: 40, y: 40, width: 920, height: 900),
-            hasHorizontalScrollBar: false,
-            hasVerticalScrollBar: false,
-            hopCount: 4
-        )
-
-        #expect(delegate.shouldPreferScrollOwnerCandidate(smallTextArea, over: nil))
-        #expect(delegate.shouldPreferScrollOwnerCandidate(enclosingWebArea, over: smallTextArea))
-    }
-
-    @Test func appLayerKeepsExplicitInnerScrollAreaOverBroaderWebArea() {
-        let delegate = AppDelegate()
-        let innerScrollArea = AppDelegate.ScrollOwnerCandidate(
-            role: "AXScrollArea",
-            subrole: nil,
-            frame: CGRect(x: 120, y: 120, width: 320, height: 260),
-            hasHorizontalScrollBar: false,
-            hasVerticalScrollBar: true,
-            hopCount: 1
-        )
-        let broaderWebArea = AppDelegate.ScrollOwnerCandidate(
-            role: "AXWebArea",
-            subrole: nil,
-            frame: CGRect(x: 40, y: 40, width: 920, height: 900),
-            hasHorizontalScrollBar: false,
-            hasVerticalScrollBar: false,
-            hopCount: 4
-        )
-
-        #expect(delegate.shouldPreferScrollOwnerCandidate(innerScrollArea, over: nil))
-        #expect(delegate.shouldPreferScrollOwnerCandidate(broaderWebArea, over: innerScrollArea) == false)
-    }
-
-    @Test func physicsUsesDeadZone() {
+    @Test func physicsSuppressesSmallMotionInsideDeadZone() {
         let physics = AutoscrollPhysics(deadZone: 15)
         let velocity = physics.velocity(
             from: CGSize(width: 10, height: 10),
@@ -312,29 +86,21 @@ struct AutoscrollCoreTests {
         #expect(velocity == .zero)
     }
 
-    @Test func physicsVelocityGrowsWithDistanceAndUsesFlippedHorizontalDirection() {
-        let physics = AutoscrollPhysics(deadZone: 15)
+    @Test func physicsAcceleratesWithDistanceAndInvertsBothAxes() {
+        let physics = AutoscrollPhysics(deadZone: 5)
 
-        let shortMove = physics.velocity(
-            from: CGSize(width: 28, height: 0),
-            sensitivity: 1.0,
-            invertVertical: false,
-            axes: .both
-        )
         let mediumMove = physics.velocity(
-            from: CGSize(width: 55, height: 0),
+            from: CGSize(width: 120, height: 0),
             sensitivity: 1.0,
             invertVertical: false,
             axes: .both
         )
-
-        #expect(shortMove.horizontal < 0)
-        #expect(abs(mediumMove.horizontal) > abs(shortMove.horizontal))
-    }
-
-    @Test func invertDirectionToggleFlipsBothHorizontalAndVerticalAxes() {
-        let physics = AutoscrollPhysics(deadZone: 15)
-
+        let farMove = physics.velocity(
+            from: CGSize(width: 260, height: 0),
+            sensitivity: 1.0,
+            invertVertical: false,
+            axes: .both
+        )
         let normalDirection = physics.velocity(
             from: CGSize(width: 40, height: 40),
             sensitivity: 1.0,
@@ -348,54 +114,158 @@ struct AutoscrollCoreTests {
             axes: .both
         )
 
+        #expect(abs(mediumMove.horizontal) < 1_700)
+        #expect(abs(farMove.horizontal) > abs(mediumMove.horizontal) * 4.5)
+        #expect(abs(farMove.horizontal) > 8_000)
         #expect(normalDirection.horizontal == -invertedDirection.horizontal)
         #expect(normalDirection.vertical == -invertedDirection.vertical)
     }
 
-    @Test func modeMachineTransitionsToHoldingAfterDeadZoneCrossing() {
-        let mode = AutoscrollBehavior.transitionedMode(
-            from: .initial,
-            anchorPoint: .zero,
-            currentPoint: CGPoint(x: 20, y: 0),
-            activationButtonIsDown: true
-        )
+    @Test func emissionStepProducesComparableDistanceAcrossTickRates() {
+        let velocity = AutoscrollVelocity(horizontal: 0, vertical: 4_750)
+        var carryAt60Hz = AutoscrollVelocity.zero
+        var carryAt100Hz = AutoscrollVelocity.zero
+        var totalAt60Hz: CGFloat = 0
+        var totalAt100Hz: CGFloat = 0
 
-        #expect(mode == .holding)
+        for _ in 0..<60 {
+            let step = AutoscrollBehavior.emissionStep(
+                velocity: velocity,
+                elapsedTime: 1.0 / 60.0,
+                carry: carryAt60Hz
+            )
+            carryAt60Hz = step.carry
+            totalAt60Hz += step.delta.vertical
+        }
+
+        for _ in 0..<100 {
+            let step = AutoscrollBehavior.emissionStep(
+                velocity: velocity,
+                elapsedTime: 1.0 / 100.0,
+                carry: carryAt100Hz
+            )
+            carryAt100Hz = step.carry
+            totalAt100Hz += step.delta.vertical
+        }
+
+        #expect(abs(totalAt60Hz - totalAt100Hz) <= 2)
     }
 
-    @Test func clickReleaseInsideDeadZoneBecomesToggled() {
-        let mode = AutoscrollBehavior.transitionedMode(
-            from: .initial,
-            anchorPoint: .zero,
-            currentPoint: CGPoint(x: 3, y: 3),
-            activationButtonIsDown: false
+    @Test func smoothingKeepsLowSpeedNearCenterResponsive() {
+        let smoothedVelocity = AutoscrollBehavior.smoothedVelocity(
+            previous: .zero,
+            target: AutoscrollVelocity(horizontal: 0, vertical: 27),
+            elapsedTime: AutoscrollBehavior.preferredTickInterval
         )
 
-        #expect(mode == .toggled)
-    }
-
-    @Test func movePastDeadZoneThenReleaseStops() {
-        let mode = AutoscrollBehavior.transitionedMode(
-            from: .holding,
-            anchorPoint: .zero,
-            currentPoint: CGPoint(x: 30, y: 0),
-            activationButtonIsDown: false
-        )
-
-        #expect(mode == .inactive)
+        #expect(smoothedVelocity.vertical > 0)
+        #expect(smoothedVelocity.vertical < 27)
     }
 
     @MainActor
-    @Test func syntheticPixelWheelEventChangesRealScrollViewOffset() {
-        let harness = ScrollObservationHarness()
-        harness.setVerticalOffset(320)
-        let initialOffset = harness.verticalOffset
-        guard let scrollEvent = makeScrollEvent(verticalAmount: -120) else {
-            Issue.record("Failed to create synthetic scroll event")
+    @Test func middleClickStartsAutoscrollOnButtonRelease() {
+        let delegate = AppDelegate()
+        delegate.accessibilityTargetInfoResolver = { _ in
+            var info = AppDelegate.AccessibilityTargetInfo()
+            info.roles = ["AXScrollArea"]
+            info.canScrollVertically = true
+            return info
+        }
+
+        let clickPoint = CGPoint(x: 120, y: 140)
+        guard let mouseDown = makeOtherMouseEvent(type: .otherMouseDown, location: clickPoint, buttonNumber: 2),
+              let mouseUp = makeOtherMouseEvent(type: .otherMouseUp, location: clickPoint, buttonNumber: 2) else {
+            Issue.record("Failed to create middle-click events")
             return
         }
-        harness.apply(scrollEvent)
-        #expect(harness.verticalOffset != initialOffset)
+
+        _ = delegate.handleOtherMouseDown(mouseDown, buttonNumber: 2)
+        _ = delegate.handleOtherMouseUp(mouseUp, buttonNumber: 2)
+
+        let session = try? #require(delegate.activeSession)
+        #expect(delegate.isAutoScrolling)
+        #expect(session?.activationButtonNumber == 2)
+    }
+
+    @MainActor
+    @Test func leftClickStopsAutoscrollAndIsSwallowedOnce() {
+        let delegate = AppDelegate()
+        primeDelegateForPerformScroll(
+            delegate,
+            session: makePerformScrollSession(),
+            physicalPointer: CGPoint(x: 80, y: 120),
+            deliveryPointer: CGPoint(x: 80, y: 120)
+        )
+
+        guard let leftDown = makeOtherMouseEvent(
+            type: .leftMouseDown,
+            location: CGPoint(x: 80, y: 120),
+            buttonNumber: 0
+        ),
+        let leftUp = makeOtherMouseEvent(
+            type: .leftMouseUp,
+            location: CGPoint(x: 80, y: 120),
+            buttonNumber: 0
+        ) else {
+            Issue.record("Failed to create left-click events")
+            return
+        }
+
+        #expect(delegate.handleStopClick(leftDown, buttonNumber: 0) == nil)
+        #expect(delegate.isAutoScrolling == false)
+        #expect(delegate.swallowIfNeeded(leftUp, buttonNumber: 0) == nil)
+    }
+
+    @MainActor
+    @Test func rightClickStopsAutoscrollButStillForwardsEvent() {
+        let delegate = AppDelegate()
+        primeDelegateForPerformScroll(
+            delegate,
+            session: makePerformScrollSession(),
+            physicalPointer: CGPoint(x: 80, y: 120),
+            deliveryPointer: CGPoint(x: 80, y: 120)
+        )
+
+        guard let rightDown = makeOtherMouseEvent(
+            type: .rightMouseDown,
+            location: CGPoint(x: 80, y: 120),
+            buttonNumber: 1
+        ),
+        let rightUp = makeOtherMouseEvent(
+            type: .rightMouseUp,
+            location: CGPoint(x: 80, y: 120),
+            buttonNumber: 1
+        ) else {
+            Issue.record("Failed to create right-click events")
+            return
+        }
+
+        #expect(delegate.handleStopClick(rightDown, buttonNumber: 1) != nil)
+        #expect(delegate.isAutoScrolling == false)
+        #expect(delegate.swallowIfNeeded(rightUp, buttonNumber: 1) != nil)
+    }
+
+    @MainActor
+    @Test func externalWheelInputDoesNotCancelActiveAutoscroll() {
+        let delegate = AppDelegate()
+        primeDelegateForPerformScroll(
+            delegate,
+            session: makePerformScrollSession(),
+            physicalPointer: CGPoint(x: 80, y: 120),
+            deliveryPointer: CGPoint(x: 80, y: 120)
+        )
+
+        guard let scrollEvent = makeScrollEvent(verticalAmount: -40) else {
+            Issue.record("Failed to create external scroll event")
+            return
+        }
+
+        let proxy = unsafeBitCast(0x1, to: CGEventTapProxy.self)
+        let forwardedEvent = delegate.handleEventTap(proxy: proxy, type: .scrollWheel, event: scrollEvent)
+
+        #expect(forwardedEvent != nil)
+        #expect(delegate.isAutoScrolling)
+        #expect(delegate.activeSession != nil)
     }
 
     @MainActor
@@ -407,13 +277,14 @@ struct AutoscrollCoreTests {
             Issue.record("Failed to create synthetic horizontal scroll event")
             return
         }
+
         harness.apply(scrollEvent)
         #expect(harness.horizontalOffset != initialOffset)
     }
 
     @MainActor
     @Test func sessionTapFallbackDeliveryChangesRealScrollViewOffset() throws {
-        guard let capture = try? ScrollEventCapture() else {
+        guard let capture = makeScrollEventCapture() else {
             return
         }
         defer { capture.stop() }
@@ -421,10 +292,7 @@ struct AutoscrollCoreTests {
         let delegate = AppDelegate()
         let session = AutoscrollSession(
             anchorPoint: CGPoint(x: 120, y: 120),
-            deliveryPoint: CGPoint(x: 120, y: 120),
-            targetPID: nil,
             targetWindowID: nil,
-            latchedScrollOwner: nil,
             canScrollHorizontally: false,
             canScrollVertically: true,
             activationButtonNumber: 2
@@ -455,94 +323,8 @@ struct AutoscrollCoreTests {
     }
 
     @MainActor
-    @Test func currentProcessDeliveryChangesRealScrollViewOffset() throws {
-        guard let capture = try? ScrollEventCapture() else {
-            return
-        }
-        defer { capture.stop() }
-
-        let delegate = AppDelegate()
-        let session = AutoscrollSession(
-            anchorPoint: CGPoint(x: 120, y: 120),
-            deliveryPoint: CGPoint(x: 120, y: 120),
-            targetPID: getpid(),
-            targetWindowID: nil,
-            latchedScrollOwner: nil,
-            canScrollHorizontally: false,
-            canScrollVertically: true,
-            activationButtonNumber: 2
-        )
-        guard let scrollEvent = makeScrollEvent(verticalAmount: -120) else {
-            Issue.record("Failed to create synthetic scroll event")
-            return
-        }
-
-        scrollEvent.location = CGPoint(x: 280, y: 120)
-        markAsSyntheticScroll(scrollEvent)
-        delegate.deliverScrollEvent(
-            scrollEvent,
-            session: session,
-            horizontalAmount: 0,
-            verticalAmount: -120
-        )
-
-        let deliveredEvent = try #require(capture.waitForEvent())
-        #expect(deliveredEvent.location == CGPoint(x: 280, y: 120))
-
-        let harness = ScrollObservationHarness()
-        harness.setVerticalOffset(320)
-        let initialOffset = harness.verticalOffset
-        harness.apply(deliveredEvent)
-
-        #expect(harness.verticalOffset != initialOffset)
-    }
-
-    @MainActor
-    @Test func currentProcessDeliveryChangesRealScrollViewHorizontalOffset() throws {
-        guard let capture = try? ScrollEventCapture() else {
-            return
-        }
-        defer { capture.stop() }
-
-        let delegate = AppDelegate()
-        let session = AutoscrollSession(
-            anchorPoint: CGPoint(x: 120, y: 120),
-            deliveryPoint: CGPoint(x: 120, y: 120),
-            targetPID: getpid(),
-            targetWindowID: nil,
-            latchedScrollOwner: nil,
-            canScrollHorizontally: true,
-            canScrollVertically: false,
-            activationButtonNumber: 2
-        )
-        guard let scrollEvent = makeScrollEvent(verticalAmount: 0, horizontalAmount: -120) else {
-            Issue.record("Failed to create synthetic horizontal scroll event")
-            return
-        }
-
-        scrollEvent.location = CGPoint(x: 280, y: 120)
-        markAsSyntheticScroll(scrollEvent)
-        delegate.deliverScrollEvent(
-            scrollEvent,
-            session: session,
-            horizontalAmount: -120,
-            verticalAmount: 0
-        )
-
-        let deliveredEvent = try #require(capture.waitForEvent())
-        #expect(deliveredEvent.location == CGPoint(x: 280, y: 120))
-
-        let harness = ScrollObservationHarness()
-        harness.setHorizontalOffset(320)
-        let initialOffset = harness.horizontalOffset
-        harness.apply(deliveredEvent)
-
-        #expect(harness.horizontalOffset != initialOffset)
-    }
-
-    @MainActor
-    @Test func activeOwnerEmitsAndScrollsViaPerformScroll() throws {
-        guard let capture = try? ScrollEventCapture() else {
+    @Test func performScrollEmitsAndScrollsInMatchedWindow() throws {
+        guard let capture = makeScrollEventCapture() else {
             return
         }
         defer { capture.stop() }
@@ -559,19 +341,26 @@ struct AutoscrollCoreTests {
         harness.setVerticalOffset(320)
         let initialOffset = harness.verticalOffset
 
-        delegate.performScroll()
+        var deliveredEvent: CGEvent?
+        for _ in 0..<8 {
+            delegate.performScroll()
+            deliveredEvent = capture.waitForEvent(timeout: 0.05)
+            if deliveredEvent != nil {
+                break
+            }
+        }
 
-        let deliveredEvent = try #require(capture.waitForEvent())
-        #expect(deliveredEvent.getIntegerValueField(.eventSourceUserData) == 0x5352434C)
-        #expect(deliveredEvent.getIntegerValueField(.scrollWheelEventPointDeltaAxis1) != 0)
-        harness.apply(deliveredEvent)
+        let scrollEvent = try #require(deliveredEvent)
+        #expect(scrollEvent.getIntegerValueField(.eventSourceUserData) == 0x5352434C)
+        #expect(scrollEvent.getIntegerValueField(.scrollWheelEventPointDeltaAxis1) != 0)
+        harness.apply(scrollEvent)
         #expect(harness.verticalOffset != initialOffset)
         #expect(delegate.isAutoScrolling == true)
     }
 
     @MainActor
-    @Test func ownerMismatchPausesWithNoEmissionButKeepsSessionActiveViaPerformScroll() throws {
-        guard let capture = try? ScrollEventCapture() else {
+    @Test func windowMismatchPausesEmissionButKeepsSessionActive() throws {
+        guard let capture = makeScrollEventCapture() else {
             return
         }
         defer { capture.stop() }
@@ -586,85 +375,38 @@ struct AutoscrollCoreTests {
             physicalPointer: CGPoint(x: 260, y: 220),
             deliveryPointer: CGPoint(x: 260, y: 220)
         )
-
-        delegate.performScroll()
-
-        #expect(capture.waitForEvent(timeout: 0.15) == nil)
-        #expect(delegate.isAutoScrolling == true)
-        let activeSession = try #require(delegate.activeSession)
-        #expect(activeSession.targetWindowID == 11)
-        #expect(activeSession.velocity != .zero)
-    }
-
-    @MainActor
-    @Test func differentPaneInSameWindowEmitsNoEventAndKeepsSessionActive() throws {
-        guard let capture = try? ScrollEventCapture() else {
-            return
-        }
-        defer { capture.stop() }
-
-        let delegate = AppDelegate()
-        delegate.windowIDResolver = { _ in 11 }
-        let session = AutoscrollSession(
-            anchorPoint: CGPoint(x: 80, y: 120),
-            deliveryPoint: CGPoint(x: 80, y: 120),
-            targetPID: nil,
-            targetWindowID: 11,
-            latchedScrollOwner: AutoscrollScrollOwner(
-                role: "AXScrollArea",
-                subrole: nil,
-                frame: CGRect(x: 0, y: 0, width: 160, height: 240)
-            ),
-            canScrollHorizontally: false,
-            canScrollVertically: true,
-            activationButtonNumber: 2
-        )
-        delegate.activeSession = session
-        delegate.isAutoScrolling = true
-
-        guard let scrollEvent = makeScrollEvent(verticalAmount: -120) else {
-            Issue.record("Failed to create synthetic scroll event")
-            return
-        }
-
-        scrollEvent.location = CGPoint(x: 260, y: 120)
-        markAsSyntheticScroll(scrollEvent)
-        delegate.deliverScrollEvent(
-            scrollEvent,
-            session: session,
-            horizontalAmount: 0,
-            verticalAmount: -120
-        )
-
-        #expect(capture.waitForEvent(timeout: 0.15) == nil)
-        #expect(delegate.isAutoScrolling == true)
-        let activeSession = try #require(delegate.activeSession)
-        #expect(activeSession.latchedScrollOwner == session.latchedScrollOwner)
-    }
-
-    @MainActor
-    @Test func returningInsideOwnerResumesEmissionAndScrollingViaPerformScroll() throws {
-        guard let capture = try? ScrollEventCapture() else {
-            return
-        }
-        defer { capture.stop() }
-
-        let delegate = AppDelegate()
-        delegate.windowIDResolver = { point in
-            point.x < 160 ? 11 : 44
-        }
-        primeDelegateForPerformScroll(
-            delegate,
-            session: makePerformScrollSession(targetWindowID: 11),
-            physicalPointer: CGPoint(x: 260, y: 220),
-            deliveryPointer: CGPoint(x: 260, y: 220)
-        )
+        capture.reset()
 
         delegate.performScroll()
 
         #expect(capture.waitForEvent(timeout: 0.15) == nil)
         #expect(delegate.isAutoScrolling == true)
         #expect(delegate.activeSession != nil)
+    }
+
+    @MainActor
+    @Test func returningInsideWindowResumesEmissionAndScrolling() throws {
+        guard let capture = makeScrollEventCapture() else {
+            return
+        }
+        defer { capture.stop() }
+
+        let delegate = AppDelegate()
+        delegate.windowIDResolver = { point in
+            point.x < 160 ? 11 : 44
+        }
+        primeDelegateForPerformScroll(
+            delegate,
+            session: makePerformScrollSession(targetWindowID: 11),
+            physicalPointer: CGPoint(x: 260, y: 220),
+            deliveryPointer: CGPoint(x: 260, y: 220)
+        )
+        capture.reset()
+
+        delegate.performScroll()
+
+        #expect(capture.waitForEvent(timeout: 0.15) == nil)
+        #expect(delegate.isAutoScrolling == true)
 
         delegate.windowIDResolver = { _ in 11 }
         delegate.lastPhysicalPointerLocation = CGPoint(x: 80, y: 220)
@@ -680,45 +422,6 @@ struct AutoscrollCoreTests {
         harness.apply(deliveredEvent)
         #expect(harness.verticalOffset != initialOffset)
         #expect(delegate.isAutoScrolling == true)
-    }
-
-    @MainActor
-    @Test func targetPIDLossStillStops() throws {
-        guard let capture = try? ScrollEventCapture() else {
-            return
-        }
-        defer { capture.stop() }
-
-        let delegate = AppDelegate()
-        let session = AutoscrollSession(
-            anchorPoint: CGPoint(x: 80, y: 120),
-            deliveryPoint: CGPoint(x: 80, y: 120),
-            targetPID: pid_t.max,
-            targetWindowID: nil,
-            latchedScrollOwner: nil,
-            canScrollHorizontally: false,
-            canScrollVertically: true,
-            activationButtonNumber: 2
-        )
-        delegate.activeSession = session
-        delegate.isAutoScrolling = true
-
-        guard let scrollEvent = makeScrollEvent(verticalAmount: -120) else {
-            Issue.record("Failed to create synthetic scroll event")
-            return
-        }
-
-        scrollEvent.location = CGPoint(x: 80, y: 120)
-        markAsSyntheticScroll(scrollEvent)
-        delegate.deliverScrollEvent(
-            scrollEvent,
-            session: session,
-            horizontalAmount: 0,
-            verticalAmount: -120
-        )
-
-        #expect(capture.waitForEvent(timeout: 0.15) == nil)
-        #expect(delegate.isAutoScrolling == false)
     }
 
 }
@@ -774,6 +477,12 @@ private final class ScrollEventCapture {
             RunLoop.current.run(until: Date().addingTimeInterval(0.01))
         }
         return capturedEvent
+    }
+
+    func reset() {
+        capturedEvent = nil
+        RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+        capturedEvent = nil
     }
 
     func stop() {
@@ -853,26 +562,6 @@ private struct ScrollObservationHarness {
 }
 
 @MainActor
-private struct SplitPaneScrollHarness {
-    let left = ScrollObservationHarness()
-    let right = ScrollObservationHarness()
-    let splitX: CGFloat = 160
-
-    init() {
-        left.setVerticalOffset(320)
-        right.setVerticalOffset(320)
-    }
-
-    func apply(_ event: CGEvent) {
-        if event.location.x < splitX {
-            left.apply(event)
-        } else {
-            right.apply(event)
-        }
-    }
-}
-
-@MainActor
 private func pumpMainRunLoop(for duration: TimeInterval) {
     let deadline = Date().addingTimeInterval(duration)
     repeat {
@@ -897,24 +586,49 @@ private func makeScrollEvent(verticalAmount: Int32, horizontalAmount: Int32 = 0)
     return scrollEvent
 }
 
+private func makeOtherMouseEvent(type: CGEventType, location: CGPoint, buttonNumber: Int) -> CGEvent? {
+    let mouseButton: CGMouseButton
+    switch buttonNumber {
+    case 0:
+        mouseButton = .left
+    case 1:
+        mouseButton = .right
+    default:
+        mouseButton = .center
+    }
+
+    let event = CGEvent(
+        mouseEventSource: nil,
+        mouseType: type,
+        mouseCursorPosition: location,
+        mouseButton: mouseButton
+    )
+    event?.setIntegerValueField(.mouseEventButtonNumber, value: Int64(buttonNumber))
+    return event
+}
+
 private func markAsSyntheticScroll(_ scrollEvent: CGEvent) {
     scrollEvent.setIntegerValueField(.eventSourceUserData, value: 0x5352434C)
 }
 
+private func makeScrollEventCapture() -> ScrollEventCapture? {
+    do {
+        return try ScrollEventCapture()
+    } catch {
+        Issue.record("Failed to create scroll event capture: \(error)")
+        return nil
+    }
+}
+
 private func makePerformScrollSession(
-    targetWindowID: CGWindowID? = nil,
-    latchedScrollOwner: AutoscrollScrollOwner? = nil
+    targetWindowID: CGWindowID? = nil
 ) -> AutoscrollSession {
     AutoscrollSession(
         anchorPoint: CGPoint(x: 80, y: 120),
-        deliveryPoint: CGPoint(x: 80, y: 120),
-        targetPID: nil,
         targetWindowID: targetWindowID,
-        latchedScrollOwner: latchedScrollOwner,
         canScrollHorizontally: false,
         canScrollVertically: true,
-        activationButtonNumber: 2,
-        mode: .toggled
+        activationButtonNumber: 2
     )
 }
 
@@ -927,7 +641,6 @@ private func primeDelegateForPerformScroll(
     delegate.activeSession = session
     delegate.isAutoScrolling = true
     delegate.activationButtonIsDown = false
-    delegate.lastObservedFlags = []
     delegate.lastPhysicalPointerLocation = physicalPointer
     delegate.lastDeliveryPointerLocation = deliveryPointer
     delegate.scrollSensitivity = 1.0

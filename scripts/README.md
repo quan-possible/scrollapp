@@ -7,7 +7,7 @@ This directory contains the build automation scripts for Scrollapp.
 ### `open_local_xcode.sh`
 Creates a local Xcode project wrapper outside Google Drive / File Provider and opens it in Xcode.
 
-This is useful when the real repository lives under `Library/CloudStorage/...` and Xcode freezes while opening the cloud-backed `.xcodeproj`. The wrapper keeps edits flowing back to the original repository by symlinking the source directories to the real files.
+This is useful when the real repository lives under `Library/CloudStorage/...` and Xcode freezes while opening the cloud-backed `.xcodeproj`. The wrapper keeps edits flowing back to the original repository by symlinking the maintained source directories to the real files.
 
 If `xcodegen` is installed, the wrapper regenerates the local `Scrollapp.xcodeproj` from the real `project.yml` so project structure stays aligned with the checked-in spec. If not, it falls back to copying the checked-in `Scrollapp.xcodeproj`.
 
@@ -57,6 +57,7 @@ This is the strongest practical verification path that stays inside the test hos
 - the emitted event still moves a real scrollable AppKit view
 
 The script runs `xcodebuild` with `COPYFILE_DISABLE=1` and a `/private/tmp` derived-data path so Google Drive / File Provider extended attributes do not poison the `.xctest` bundle during codesign.
+If the repo lives under Google Drive / `Library/CloudStorage`, it automatically routes the build through the local wrapper project from `open_local_xcode.sh`.
 
 **Usage:**
 ```bash
@@ -65,15 +66,30 @@ The script runs `xcodebuild` with `COPYFILE_DISABLE=1` and a `/private/tmp` deri
 
 **Current limitation:** this lane proves real observable AppKit scroll output for the emitted event path, but it does not prove cross-app routing in the live menu bar app.
 
+### `verify_launch_smoke.sh`
+Runs the simplest reliable launch-smoke check for the built menu bar app.
+
+This script builds the app into a temporary derived-data path, launches the built binary in automated test mode, and verifies that the process stays alive long enough to prove the app can boot cleanly without crashing on startup.
+If the repo lives under Google Drive / `Library/CloudStorage`, it automatically routes the build through the local wrapper project from `open_local_xcode.sh`.
+
+**Usage:**
+```bash
+./scripts/verify_launch_smoke.sh
+```
+
+**Current limitation:** this is a direct process-level smoke check, not a full XCTest UI automation lane.
+
 ### `verify_autoscroll_external_no_cursor.sh`
 Runs the strongest realistic no-cursor verification lane for autoscroll delivery.
 
-This script builds the app, refreshes `/Applications/Scrollapp.app`, launches the built menu bar app in a verification-only command mode, opens a separate temporary AppKit fixture window with a real `NSScrollView`, and drives the live `performScroll()` path against that external target without warping or stealing the system cursor.
+This script builds the app, refreshes `/Applications/Scrollapp.app`, launches the built menu bar app in a verification-only command mode, opens a separate temporary AppKit fixture window with a real `NSScrollView`, and waits for the live timer-driven autoscroll session to move that external target without warping or stealing the system cursor.
+If the repo lives under Google Drive / `Library/CloudStorage`, it automatically routes the build through the local wrapper project from `open_local_xcode.sh`.
 
 It verifies that:
 - the built app can latch a real external scroll target
 - the runtime session-tap delivery path emits observable scrolling into another process
-- the external fixture's scroll offset actually changes
+- the external fixture's vertical offset increases in the expected direction by a meaningful amount
+- the reported `scrollDelivery` and `scrollEmission` diagnostics are refreshed after motion is observed
 
 **Usage:**
 ```bash
@@ -82,6 +98,7 @@ It verifies that:
 
 **Notes:**
 - This is the strongest practical verification lane in the repo when cursor takeover is not allowed.
+- It refreshes the installed app at `/Applications/Scrollapp.app` before launching the verification-only run, so treat it as an integration check against the installed-path bundle rather than a harmless scratch-only test.
 - The helper fixture reports both physical pointer coordinates and Quartz delivery coordinates because the runtime uses both during activation and delivery.
 
 ### `build_universal.sh`
@@ -109,6 +126,10 @@ Creates a distributable DMG file from a built Scrollapp.app.
 ```bash
 # Regenerate the project if needed
 xcodegen generate --spec project.yml
+
+# Run the quickest reliable verification lanes
+./scripts/verify_launch_smoke.sh
+./scripts/verify_autoscroll_delivery.sh
 
 # Build universal app
 ./scripts/build_universal.sh

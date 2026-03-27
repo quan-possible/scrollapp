@@ -1,6 +1,6 @@
 # Project Memory
 
-Last updated: 2026-03-19
+Last updated: 2026-03-22
 
 ## Current Objective
 - Restore reliable Windows-style middle-click autoscroll on macOS with the smallest generalizable implementation.
@@ -46,6 +46,7 @@ Last updated: 2026-03-19
   - read the nearest README chain before deep file exploration
   - update the relevant folder `README.md` when structure, commands, tests, or invariants change
   - require a successful final app build before sign-off
+  - require a relaunch of the freshly built app before sign-off so the running process matches the verified build
   - require at least one direct verification of built-app behavior rather than stopping at indirect unit evidence
 
 ## Canonical Job Context

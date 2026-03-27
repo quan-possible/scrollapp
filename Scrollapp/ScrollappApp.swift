@@ -21,6 +21,7 @@ struct ScrollappApp: App {
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let syntheticScrollUserData: Int64 = 0x5352434C
+    private let toggledSessionDescription = "toggled"
     private let verificationCommandNotification = Notification.Name("com.fromis9.scrollapp.verification.command")
 
     var statusItem: NSStatusItem!
@@ -31,6 +32,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var eventTapSource: CFRunLoopSource?
     var indicatorPanel: NSPanel?
     var activeSession: AutoscrollSession?
+    var pendingActivationSession: AutoscrollSession?
+    var lastScrollStepTime: TimeInterval?
     var activationButtonIsDown = false
     var swallowedButtons = Set<Int>()
     var lastObservedFlags: CGEventFlags = []
@@ -44,10 +47,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var isStatusMenuOpen = false
     var diagnosticsRefreshPending = false
     var windowIDResolver: ((CGPoint) -> CGWindowID?)?
+    var accessibilityTargetInfoResolver: ((CGPoint) -> AccessibilityTargetInfo?)?
     var verificationObserver: NSObjectProtocol?
 
     struct AccessibilityTargetInfo {
-        var pid: pid_t?
         var roles = [String]()
         var subroles = [String]()
         var actionNames = [String]()
@@ -56,18 +59,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         var actionabilityReasons = [String]()
         var canScrollHorizontally = false
         var canScrollVertically = false
-        var scrollOwnerRole: String?
-        var scrollOwnerSubrole: String?
-        var scrollOwnerFrame: CGRect?
-    }
-
-    struct ScrollOwnerCandidate: Equatable {
-        var role: String?
-        var subrole: String?
-        var frame: CGRect?
-        var hasHorizontalScrollBar: Bool
-        var hasVerticalScrollBar: Bool
-        var hopCount: Int
     }
 
     struct RuntimePermissionStatus {
@@ -385,46 +376,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func activateVerificationToggle(physicalPoint: CGPoint, deliveryPoint: CGPoint) -> Bool {
         lastPhysicalPointerLocation = physicalPoint
         lastDeliveryPointerLocation = deliveryPoint
-        activationButtonIsDown = true
 
-        let startedSession: AutoscrollSession
-        switch classifyActivation(at: deliveryPoint) {
-        case .passThrough:
-            activationButtonIsDown = false
+        guard let startedSession = classifyActivation(at: deliveryPoint) else {
             return false
-        case .start(let session):
-            startedSession = session
         }
 
-        startAutoScroll(
-            with: AutoscrollSession(
-                anchorPoint: physicalPoint,
-                deliveryPoint: deliveryPoint,
-                targetPID: startedSession.targetPID,
-                targetWindowID: startedSession.targetWindowID,
-                latchedScrollOwner: startedSession.latchedScrollOwner,
-                canScrollHorizontally: startedSession.canScrollHorizontally,
-                canScrollVertically: startedSession.canScrollVertically,
-                activationButtonNumber: startedSession.activationButtonNumber,
-                mode: startedSession.mode,
-                velocity: startedSession.velocity
-            )
-        )
+        startAutoScroll(with: sessionForActivation(anchorPoint: physicalPoint, classifiedSession: startedSession))
         activationButtonIsDown = false
 
-        guard var session = activeSession else {
+        guard activeSession != nil else {
             return false
         }
 
-        session.mode = AutoscrollBehavior.transitionedMode(
-            from: session.mode,
-            anchorPoint: session.anchorPoint,
-            currentPoint: physicalPoint,
-            activationButtonIsDown: false
-        )
-        activeSession = session
-        updateSessionStateStatus("mode=\(String(describing: session.mode)) buttonDown=N")
-        return session.mode != .inactive
+        updateSessionStateStatus(sessionStateDescription(buttonDown: false))
+        return true
     }
 
     func writeVerificationStatus(
@@ -437,7 +402,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
 
-        let sessionMode = activeSession.map { String(describing: $0.mode) } ?? "nil"
+        let sessionMode = activeSession == nil ? "nil" : toggledSessionDescription
         let payload: [String: Any] = [
             "ready": true,
             "pid": getpid(),
@@ -763,7 +728,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .otherMouseUp:
             return handleOtherMouseUp(event, buttonNumber: buttonNumber)
         case .scrollWheel:
-            return handleScrollWheel(event)
+            return Unmanaged.passUnretained(event)
         case .leftMouseDown:
             return handleStopClick(event, buttonNumber: 0)
         case .leftMouseUp:
@@ -777,18 +742,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         default:
             return Unmanaged.passUnretained(event)
         }
-    }
-
-    func handleScrollWheel(_ event: CGEvent) -> Unmanaged<CGEvent>? {
-        if event.getIntegerValueField(.eventSourceUserData) == syntheticScrollUserData {
-            return Unmanaged.passUnretained(event)
-        }
-
-        if isAutoScrolling {
-            updateStopReasonStatus("interrupted by external scroll input")
-            stopAutoScroll()
-        }
-        return Unmanaged.passUnretained(event)
     }
 
     func handleOtherMouseDown(_ event: CGEvent, buttonNumber: Int) -> Unmanaged<CGEvent>? {
@@ -811,7 +764,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 stopAutoScroll()
                 return nil
             }
-            return Unmanaged.passUnretained(event)
+
+            updateActivationMatchStatus("stop by other button \(buttonNumber)")
+            updateActivationDecisionStatus("stop active autoscroll")
+            return handleStopClick(event, buttonNumber: buttonNumber)
         }
 
         if buttonNumber != activationButtonNumber {
@@ -823,28 +779,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         activationButtonIsDown = true
         updateActivationMatchStatus("yes")
 
-        switch classifyActivation(at: deliveryPoint) {
-        case .passThrough:
+        guard let session = classifyActivation(at: deliveryPoint) else {
             activationButtonIsDown = false
             return Unmanaged.passUnretained(event)
-        case .start(let session):
-            swallowedButtons.insert(buttonNumber)
-            startAutoScroll(
-                with: AutoscrollSession(
-                    anchorPoint: activationPoint,
-                    deliveryPoint: deliveryPoint,
-                    targetPID: session.targetPID,
-                    targetWindowID: session.targetWindowID,
-                    latchedScrollOwner: session.latchedScrollOwner,
-                    canScrollHorizontally: session.canScrollHorizontally,
-                    canScrollVertically: session.canScrollVertically,
-                    activationButtonNumber: session.activationButtonNumber,
-                    mode: session.mode,
-                    velocity: session.velocity
-                )
-            )
-            return nil
         }
+
+        swallowedButtons.insert(buttonNumber)
+        pendingActivationSession = sessionForActivation(anchorPoint: activationPoint, classifiedSession: session)
+        updateActivationDecisionStatus("armed toggle on release")
+        return nil
     }
 
     func handleOtherMouseUp(_ event: CGEvent, buttonNumber: Int) -> Unmanaged<CGEvent>? {
@@ -857,22 +800,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if swallowedButtons.contains(buttonNumber) {
             swallowedButtons.remove(buttonNumber)
 
-            if var session = activeSession, buttonNumber == session.activationButtonNumber {
-                session.mode = AutoscrollBehavior.transitionedMode(
-                    from: session.mode,
-                    anchorPoint: session.anchorPoint,
-                    currentPoint: event.unflippedLocation,
-                    activationButtonIsDown: false
-                )
+            if let session = pendingActivationSession, buttonNumber == activationButtonNumber {
+                pendingActivationSession = nil
+                startAutoScroll(with: session)
+                return nil
+            }
 
-                if session.mode == .inactive {
-                    updateSessionStateStatus("mode=inactive buttonDown=N")
-                    updateStopReasonStatus("activation button released after hold")
-                    stopAutoScroll()
-                } else {
-                    activeSession = session
-                    updateSessionStateStatus("mode=\(String(describing: session.mode)) buttonDown=N")
-                }
+            if activeSession != nil, buttonNumber == activationButtonNumber {
+                updateSessionStateStatus(sessionStateDescription(buttonDown: false))
             }
             return nil
         }
@@ -887,7 +822,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         updateStopReasonStatus("stopped by click \(buttonNumber)")
         stopAutoScroll()
-        if AutoscrollStopClickPolicy.shouldSwallow(buttonNumber: buttonNumber) {
+        if buttonNumber == 0 {
             swallowedButtons.insert(buttonNumber)
             return nil
         }
@@ -902,11 +837,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return Unmanaged.passUnretained(event)
     }
 
-    func classifyActivation(at eventPoint: CGPoint) -> AutoscrollActivationDisposition {
+    func classifyActivation(at eventPoint: CGPoint) -> AutoscrollSession? {
         guard let info = accessibilityTargetInfo(at: eventPoint) else {
             updateAXHitTestStatus("failed @ \(Int(eventPoint.x.rounded())),\(Int(eventPoint.y.rounded()))")
             updateActivationDecisionStatus("pass through (no AX target)")
-            return .passThrough
+            return nil
         }
 
         let snapshot = targetSnapshot(for: info)
@@ -914,25 +849,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             "\(summarizeRoles(info.roles)) [H:\(info.canScrollHorizontally ? "Y" : "N") V:\(info.canScrollVertically ? "Y" : "N")\(!info.actionabilityReasons.isEmpty ? " actionable" : "")\(summarizeActionability(info.actionabilityReasons))]"
         )
 
-        let targetBehavior = AutoscrollTargetClassifier.behavior(for: snapshot)
-
-        if targetBehavior == .passThrough {
+        let resolution = AutoscrollTargetClassifier.classify(snapshot)
+        if !resolution.shouldStart {
             updateActivationDecisionStatus("pass through (classifier)")
-            return .passThrough
+            return nil
         }
 
-        if targetBehavior == .undetermined {
-            updateActivationDecisionStatus("pass through (undetermined target)")
-            return .passThrough
-        }
-
-        let fallbackAxes = AutoscrollTargetClassifier.fallbackAxes(for: snapshot)
+        let fallbackAxes = resolution.fallbackAxes
         let canScrollHorizontally = info.canScrollHorizontally || fallbackAxes.horizontal
         let canScrollVertically = info.canScrollVertically || fallbackAxes.vertical
 
         guard canScrollHorizontally || canScrollVertically else {
             updateActivationDecisionStatus("pass through (no scroll axes)")
-            return .passThrough
+            return nil
         }
 
         let axisDescription: String
@@ -948,17 +877,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         updateActivationDecisionStatus(axisDescription)
 
-        return .start(
-            AutoscrollSession(
-                anchorPoint: eventPoint,
-                deliveryPoint: eventPoint,
-                targetPID: info.pid,
-                targetWindowID: windowID(at: eventPoint),
-                latchedScrollOwner: scrollOwner(for: info),
-                canScrollHorizontally: canScrollHorizontally,
-                canScrollVertically: canScrollVertically,
-                activationButtonNumber: activationButtonNumber
-            )
+        return AutoscrollSession(
+            anchorPoint: eventPoint,
+            targetWindowID: windowID(at: eventPoint),
+            canScrollHorizontally: canScrollHorizontally,
+            canScrollVertically: canScrollVertically,
+            activationButtonNumber: activationButtonNumber
+        )
+    }
+
+    func sessionForActivation(anchorPoint: CGPoint, classifiedSession: AutoscrollSession) -> AutoscrollSession {
+        AutoscrollSession(
+            anchorPoint: anchorPoint,
+            targetWindowID: classifiedSession.targetWindowID,
+            canScrollHorizontally: classifiedSession.canScrollHorizontally,
+            canScrollVertically: classifiedSession.canScrollVertically,
+            activationButtonNumber: classifiedSession.activationButtonNumber,
+            velocity: classifiedSession.velocity,
+            emissionCarry: classifiedSession.emissionCarry
+        )
+    }
+
+    func sessionStateDescription(buttonDown: Bool, dx: CGFloat = 0, dy: CGFloat = 0) -> String {
+        String(
+            format: "mode=%@ buttonDown=%@ dx=%.0f dy=%.0f",
+            toggledSessionDescription as NSString,
+            buttonDown ? "Y" : "N",
+            dx,
+            dy
         )
     }
 
@@ -971,14 +917,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateScrollEmissionStatus(
             "armed @ \(Int(session.anchorPoint.x.rounded())),\(Int(session.anchorPoint.y.rounded()))"
         )
-        let pidDescription = session.targetPID.map { "pid=\($0)" } ?? "pid=none"
         let windowDescription = session.targetWindowID.map { "window=\($0)" } ?? "window=none"
-        updateScrollDeliveryStatus("armed session tap live-pointer delivery (\(pidDescription), \(windowDescription))")
-        updateSessionStateStatus("mode=initial buttonDown=Y dx=0 dy=0")
+        updateScrollDeliveryStatus("armed session tap live-pointer delivery (\(windowDescription))")
+        updateSessionStateStatus(sessionStateDescription(buttonDown: activationButtonIsDown))
         updateStopReasonStatus("None")
         updateIndicator(for: session)
+        lastScrollStepTime = ProcessInfo.processInfo.systemUptime
 
-        scrollTimer = Timer.scheduledTimer(withTimeInterval: (1.0 / 60.0), repeats: true) { [weak self] _ in
+        scrollTimer = Timer.scheduledTimer(withTimeInterval: AutoscrollBehavior.preferredTickInterval, repeats: true) { [weak self] _ in
             self?.performScroll()
         }
         RunLoop.current.add(scrollTimer!, forMode: .common)
@@ -987,52 +933,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func performScroll() {
         guard var session = activeSession else { return }
 
-        let currentPoint = lastPhysicalPointerLocation ?? session.anchorPoint
-        let currentDeliveryPoint = lastDeliveryPointerLocation ?? session.deliveryPoint
-        let ownerDeliveryAllowed = ownerMatchState(for: currentDeliveryPoint, session: session)
-        if activationButtonIsDown {
-            session.mode = AutoscrollBehavior.transitionedMode(
-                from: session.mode,
-                anchorPoint: session.anchorPoint,
-                currentPoint: currentPoint,
-                activationButtonIsDown: true
-            )
-        }
+        let now = ProcessInfo.processInfo.systemUptime
+        let elapsedTime = AutoscrollBehavior.normalizedElapsedTime(
+            lastScrollStepTime.map { now - $0 }
+        )
+        lastScrollStepTime = now
 
-        let targetVelocity: AutoscrollVelocity
-        if session.mode == .initial {
-            targetVelocity = .zero
-        } else {
-            targetVelocity = AutoscrollBehavior.velocity(
-                anchorPoint: session.anchorPoint,
-                currentPoint: currentPoint,
-                sensitivity: scrollSensitivity,
-                invertVertical: isDirectionInverted,
-                axes: AutoscrollAxes(
-                    horizontal: session.canScrollHorizontally,
-                    vertical: session.canScrollVertically
-                )
+        let currentPoint = lastPhysicalPointerLocation ?? session.anchorPoint
+        let currentDeliveryPoint = lastDeliveryPointerLocation ?? session.anchorPoint
+        let ownerDeliveryAllowed = ownerMatchState(for: currentDeliveryPoint, session: session)
+        let shouldReportDetailedDiagnostics = isStatusMenuOpen || isVerificationMode
+        let targetVelocity = AutoscrollBehavior.velocity(
+            anchorPoint: session.anchorPoint,
+            currentPoint: currentPoint,
+            sensitivity: scrollSensitivity,
+            invertVertical: isDirectionInverted,
+            axes: AutoscrollAxes(
+                horizontal: session.canScrollHorizontally,
+                vertical: session.canScrollVertically
             )
-        }
+        )
 
         session.velocity = AutoscrollBehavior.smoothedVelocity(
             previous: session.velocity,
-            target: targetVelocity
+            target: targetVelocity,
+            elapsedTime: elapsedTime
         )
-        if isStatusMenuOpen {
+        if shouldReportDetailedDiagnostics {
             updateSessionStateStatus(
-                String(
-                    format: "mode=%@ buttonDown=%@ dx=%.0f dy=%.0f",
-                    String(describing: session.mode) as NSString,
-                    activationButtonIsDown ? "Y" : "N",
-                    currentPoint.x - session.anchorPoint.x,
-                    currentPoint.y - session.anchorPoint.y
+                sessionStateDescription(
+                    buttonDown: activationButtonIsDown,
+                    dx: currentPoint.x - session.anchorPoint.x,
+                    dy: currentPoint.y - session.anchorPoint.y
                 )
             )
             updateScrollEmissionStatus(
                 String(
                     format: "mode=%@ vx=%.1f vy=%.1f",
-                    String(describing: session.mode) as NSString,
+                    toggledSessionDescription as NSString,
                     session.velocity.horizontal,
                     session.velocity.vertical
                 )
@@ -1043,24 +981,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateIndicator(for: session)
 
         if !ownerDeliveryAllowed.isMatched {
-            if isStatusMenuOpen {
+            if shouldReportDetailedDiagnostics {
                 updateScrollDeliveryStatus(ownerDeliveryAllowed.statusText)
             }
             return
         }
 
         guard AutoscrollBehavior.shouldEmitScroll(session.velocity) else {
-            if isStatusMenuOpen {
+            if shouldReportDetailedDiagnostics {
                 updateScrollDeliveryStatus("idle (inside dead zone)")
             }
             return
         }
 
-        let horizontalAmount = session.canScrollHorizontally ? Int32(session.velocity.horizontal.rounded()) : 0
-        let verticalAmount = session.canScrollVertically ? Int32(session.velocity.vertical.rounded()) : 0
+        let emissionStep = AutoscrollBehavior.emissionStep(
+            velocity: AutoscrollVelocity(
+                horizontal: session.canScrollHorizontally ? session.velocity.horizontal : 0,
+                vertical: session.canScrollVertically ? session.velocity.vertical : 0
+            ),
+            elapsedTime: elapsedTime,
+            carry: session.emissionCarry
+        )
+        session.emissionCarry = emissionStep.carry
+        activeSession = session
+
+        let horizontalAmount = Int32(emissionStep.delta.horizontal)
+        let verticalAmount = Int32(emissionStep.delta.vertical)
         guard horizontalAmount != 0 || verticalAmount != 0 else {
-            if isStatusMenuOpen {
-                updateScrollDeliveryStatus("idle (rounded to zero)")
+            if shouldReportDetailedDiagnostics {
+                updateScrollDeliveryStatus("idle (subpixel carry)")
             }
             return
         }
@@ -1129,6 +1078,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         hideIndicator()
         isAutoScrolling = false
         activeSession = nil
+        pendingActivationSession = nil
+        lastScrollStepTime = nil
         activationButtonIsDown = false
         updateSessionStateStatus("inactive")
     }
@@ -1180,6 +1131,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func accessibilityTargetInfo(at eventPoint: CGPoint) -> AccessibilityTargetInfo? {
+        if let accessibilityTargetInfoResolver {
+            return accessibilityTargetInfoResolver(eventPoint)
+        }
+
         let systemWide = AXUIElementCreateSystemWide()
         for candidate in accessibilityPointCandidates(for: eventPoint) {
             var hitElement: AXUIElement?
@@ -1198,16 +1153,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let ancestryDepthLimit = 12
         let urlDepthLimit = 3
         let scrollProbeDepthLimit = 4
-        var leafRole: String?
-        var leafSubrole: String?
-        var leafFrame: CGRect?
-        var bestScrollOwnerCandidate: ScrollOwnerCandidate?
 
         while let element = current, hopCount < ancestryDepthLimit {
             let role = copyAXString(element, attribute: kAXRoleAttribute)
             let subrole = copyAXString(element, attribute: kAXSubroleAttribute)
             let urlString = hopCount <= urlDepthLimit ? copyAXValueString(element, attribute: "AXURL") : nil
-            let frame = copyAXFrame(element)
 
             if let role {
                 info.roles.append(role)
@@ -1219,9 +1169,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let actionNames = copyAXStringArray(element, attribute: "AXActions")
             if hopCount == 0, !actionNames.isEmpty {
                 info.actionNames = actionNames
-                leafRole = role
-                leafSubrole = subrole
-                leafFrame = normalizedScrollOwnerFrame(frame)
             }
 
             if info.actionableAncestorDepth == nil,
@@ -1240,9 +1187,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 info.linkedAncestorDepth = hopCount
             }
 
-            if let pid = copyPID(for: element) {
-                info.pid = pid
-            }
             let hasHorizontalScrollBar = copyAXElement(element, attribute: kAXHorizontalScrollBarAttribute) != nil
             let hasVerticalScrollBar = copyAXElement(element, attribute: kAXVerticalScrollBarAttribute) != nil
             if !info.canScrollHorizontally,
@@ -1254,23 +1198,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                hopCount <= scrollProbeDepthLimit,
                hasVerticalScrollBar {
                 info.canScrollVertically = true
-            }
-            if isScrollOwnerCandidate(
-                role: role,
-                hasHorizontalScrollBar: hasHorizontalScrollBar,
-                hasVerticalScrollBar: hasVerticalScrollBar
-               ) {
-                let candidate = ScrollOwnerCandidate(
-                    role: role,
-                    subrole: subrole,
-                    frame: normalizedScrollOwnerFrame(frame),
-                    hasHorizontalScrollBar: hasHorizontalScrollBar,
-                    hasVerticalScrollBar: hasVerticalScrollBar,
-                    hopCount: hopCount
-                )
-                if shouldPreferScrollOwnerCandidate(candidate, over: bestScrollOwnerCandidate) {
-                    bestScrollOwnerCandidate = candidate
-                }
             }
 
             if hopCount == 0 {
@@ -1290,15 +1217,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         info.actionabilityReasons = Array(Set(info.actionabilityReasons)).sorted()
-        if let bestScrollOwnerCandidate {
-            info.scrollOwnerRole = bestScrollOwnerCandidate.role
-            info.scrollOwnerSubrole = bestScrollOwnerCandidate.subrole
-            info.scrollOwnerFrame = bestScrollOwnerCandidate.frame
-        } else {
-            info.scrollOwnerRole = leafRole
-            info.scrollOwnerSubrole = leafSubrole
-            info.scrollOwnerFrame = leafFrame
-        }
         return info
     }
 
@@ -1414,141 +1332,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return CGRect(origin: origin, size: size)
     }
 
-    func copyPID(for element: AXUIElement) -> pid_t? {
-        var pid: pid_t = 0
-        return AXUIElementGetPid(element, &pid) == .success ? pid : nil
-    }
-
-    func normalizedScrollOwnerFrame(_ frame: CGRect?) -> CGRect? {
-        guard let frame,
-              frame.width > 1,
-              frame.height > 1 else {
-            return nil
-        }
-        return CGRect(
-            x: frame.origin.x.rounded(),
-            y: frame.origin.y.rounded(),
-            width: frame.width.rounded(),
-            height: frame.height.rounded()
-        )
-    }
-
-    func isScrollOwnerCandidate(
-        role: String?,
-        hasHorizontalScrollBar: Bool,
-        hasVerticalScrollBar: Bool
-    ) -> Bool {
-        if hasHorizontalScrollBar || hasVerticalScrollBar {
-            return true
-        }
-
-        let ownerRoles: Set<String> = [
-            "AXBrowser",
-            "AXCollection",
-            "AXList",
-            "AXOutline",
-            "AXScrollArea",
-            "AXTable",
-            "AXTextArea",
-            "AXWebArea"
-        ]
-        guard let role else {
-            return false
-        }
-        return ownerRoles.contains(role)
-    }
-
-    func shouldPreferScrollOwnerCandidate(
-        _ candidate: ScrollOwnerCandidate,
-        over existing: ScrollOwnerCandidate?
-    ) -> Bool {
-        guard let existing else {
-            return true
-        }
-
-        let candidateHasExplicitScrollbars = candidate.hasHorizontalScrollBar || candidate.hasVerticalScrollBar
-        let existingHasExplicitScrollbars = existing.hasHorizontalScrollBar || existing.hasVerticalScrollBar
-        if candidateHasExplicitScrollbars != existingHasExplicitScrollbars {
-            return candidateHasExplicitScrollbars
-        }
-
-        let candidatePriority = scrollOwnerRolePriority(candidate.role)
-        let existingPriority = scrollOwnerRolePriority(existing.role)
-        if candidatePriority > existingPriority {
-            if let candidateFrame = candidate.frame,
-               let existingFrame = existing.frame,
-               substantiallyContains(candidateFrame, innerFrame: existingFrame) {
-                return true
-            }
-            return existing.frame == nil && candidate.frame != nil
-        }
-
-        if candidatePriority == existingPriority {
-            if existing.frame == nil, candidate.frame != nil {
-                return true
-            }
-            if candidateHasExplicitScrollbars,
-               let candidateFrame = candidate.frame,
-               let existingFrame = existing.frame,
-               candidateFrame.equalTo(existingFrame) == false,
-               substantiallyContains(existingFrame, innerFrame: candidateFrame) == false,
-               candidate.hopCount < existing.hopCount {
-                return true
-            }
-        }
-
-        return false
-    }
-
-    func scrollOwnerRolePriority(_ role: String?) -> Int {
-        switch role {
-        case "AXScrollArea":
-            return 5
-        case "AXBrowser", "AXCollection", "AXList", "AXOutline", "AXTable":
-            return 4
-        case "AXWebArea":
-            return 3
-        case "AXTextArea":
-            return 2
-        default:
-            return 1
-        }
-    }
-
-    func substantiallyContains(_ outerFrame: CGRect, innerFrame: CGRect) -> Bool {
-        guard outerFrame.width > 1,
-              outerFrame.height > 1,
-              innerFrame.width > 1,
-              innerFrame.height > 1 else {
-            return false
-        }
-
-        let outerInset = max(4, min(outerFrame.width, outerFrame.height) * 0.01)
-        let expandedOuter = outerFrame.insetBy(dx: -outerInset, dy: -outerInset)
-        guard expandedOuter.contains(innerFrame) else {
-            return false
-        }
-
-        let outerArea = outerFrame.width * outerFrame.height
-        let innerArea = innerFrame.width * innerFrame.height
-        guard innerArea > 0 else {
-            return false
-        }
-
-        return outerArea >= innerArea * 1.5
-    }
-
-    func scrollOwner(for info: AccessibilityTargetInfo) -> AutoscrollScrollOwner? {
-        guard info.scrollOwnerRole != nil || info.scrollOwnerSubrole != nil || info.scrollOwnerFrame != nil else {
-            return nil
-        }
-        return AutoscrollScrollOwner(
-            role: info.scrollOwnerRole,
-            subrole: info.scrollOwnerSubrole,
-            frame: info.scrollOwnerFrame
-        )
-    }
-
     func windowID(at point: CGPoint) -> CGWindowID? {
         if let windowIDResolver {
             return windowIDResolver(point)
@@ -1605,29 +1388,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             guard currentWindowID == targetWindowID else {
                 return OwnerMatchState(isMatched: false, statusText: "paused on window mismatch \(currentWindowID)->\(targetWindowID)")
             }
+            return OwnerMatchState(isMatched: true, statusText: "within latched window")
         }
 
-        guard let latchedScrollOwner = session.latchedScrollOwner else {
-            return OwnerMatchState(isMatched: true, statusText: "latched owner unavailable")
-        }
-
-        if let ownerFrame = latchedScrollOwner.frame {
-            if ownerFrame.contains(currentPoint) {
-                return OwnerMatchState(isMatched: true, statusText: "within latched owner frame")
-            }
-            return OwnerMatchState(isMatched: false, statusText: "paused outside latched owner")
-        }
-
-        guard let currentInfo = accessibilityTargetInfo(at: currentPoint),
-              let currentOwner = scrollOwner(for: currentInfo) else {
-            return OwnerMatchState(isMatched: false, statusText: "paused while owner is unresolved")
-        }
-
-        if currentOwner == latchedScrollOwner {
-            return OwnerMatchState(isMatched: true, statusText: "within latched owner")
-        }
-
-        return OwnerMatchState(isMatched: false, statusText: "paused on owner mismatch")
+        return OwnerMatchState(isMatched: true, statusText: "latched window unavailable")
     }
 
     func isActionable(role: String?, subrole: String?) -> Bool {
@@ -1664,9 +1428,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func isActionableAncestor(
         role: String?,
         subrole: String?,
-        actionNames _: [String]
+        actionNames: [String]
     ) -> Bool {
-        isActionable(role: role, subrole: subrole)
+        isActionable(role: role, subrole: subrole) || hasActionableAction(actionNames)
     }
 
     func isLinkedAncestor(role: String?, urlString: String?) -> Bool {
@@ -1733,34 +1497,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         horizontalAmount: Int32,
         verticalAmount: Int32
     ) {
-        if let targetPID = session.targetPID,
-           !isLatchedTargetAvailable(targetPID) {
-            updateStopReasonStatus("stopped by target loss pid=\(targetPID)")
-            stopAutoScroll()
-            return
-        }
-
+        let shouldReportDetailedDiagnostics = isStatusMenuOpen || isVerificationMode
         let ownerMatchState = ownerMatchState(for: scrollEvent.location, session: session)
         guard ownerMatchState.isMatched else {
-            if isStatusMenuOpen {
+            if shouldReportDetailedDiagnostics {
                 updateScrollDeliveryStatus(ownerMatchState.statusText)
             }
             return
         }
 
         scrollEvent.post(tap: .cgSessionEventTap)
-        if isStatusMenuOpen {
-            let routeDescription = session.targetPID.map {
-                "session tap live-pointer route (latched pid=\($0))"
-            } ?? "session tap live-pointer route (ownerless fallback)"
+        if shouldReportDetailedDiagnostics {
             updateScrollDeliveryStatus(
-                "\(routeDescription) (\(horizontalAmount), \(verticalAmount))"
+                "session tap live-pointer route (\(horizontalAmount), \(verticalAmount))"
             )
         }
-    }
-
-    func isLatchedTargetAvailable(_ targetPID: pid_t) -> Bool {
-        NSRunningApplication(processIdentifier: targetPID) != nil
     }
 
     @discardableResult
@@ -1829,37 +1580,67 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc func toggleLaunchAtLogin() {
-        launchAtLogin.toggle()
-        UserDefaults.standard.set(launchAtLogin, forKey: "launchAtLogin")
-        updateLoginItemState()
-        if let launchItem = statusItem.menu?.items.first(where: { $0.title == "Launch at Login" }) {
-            launchItem.state = launchAtLogin ? .on : .off
+        let desiredState = !launchAtLogin
+        if applyLaunchAtLoginState(desiredState) == false {
+            NSSound.beep()
         }
     }
 
     func updateLoginItemState() {
+        let resolvedState = resolvedLaunchAtLoginState()
+        launchAtLogin = resolvedState
+        UserDefaults.standard.set(resolvedState, forKey: "launchAtLogin")
+        if let launchItem = statusItem.menu?.items.first(where: { $0.title == "Launch at Login" }) {
+            launchItem.state = resolvedState ? .on : .off
+        }
+    }
+
+    @discardableResult
+    func applyLaunchAtLoginState(_ desiredState: Bool) -> Bool {
         guard !isAutomatedTestMode else {
-            return
+            launchAtLogin = desiredState
+            UserDefaults.standard.set(desiredState, forKey: "launchAtLogin")
+            if let launchItem = statusItem.menu?.items.first(where: { $0.title == "Launch at Login" }) {
+                launchItem.state = desiredState ? .on : .off
+            }
+            return true
         }
 
+        var operationSucceeded = false
         if #available(macOS 13.0, *) {
             let service = SMAppService.mainApp
             do {
-                if launchAtLogin {
+                if desiredState {
                     if service.status != .enabled {
                         try service.register()
                     }
                 } else if service.status == .enabled {
                     try service.unregister()
                 }
+                operationSucceeded = true
             } catch {
                 print("Failed to update login item: \(error.localizedDescription)")
             }
         } else if let bundleIdentifier = Bundle.main.bundleIdentifier {
-            let success = SMLoginItemSetEnabled(bundleIdentifier as CFString, launchAtLogin)
-            if !success {
+            operationSucceeded = SMLoginItemSetEnabled(bundleIdentifier as CFString, desiredState)
+            if !operationSucceeded {
                 print("Failed to update login item using legacy API")
             }
         }
+
+        updateLoginItemState()
+        return operationSucceeded && launchAtLogin == desiredState
+    }
+
+    func resolvedLaunchAtLoginState() -> Bool {
+        guard !isAutomatedTestMode else {
+            return launchAtLogin
+        }
+
+        if #available(macOS 13.0, *) {
+            return SMAppService.mainApp.status == .enabled
+        }
+
+        return launchAtLogin
     }
 }

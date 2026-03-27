@@ -10,18 +10,12 @@
 		0F665165958EE80265FD0430 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = EBC9151011FC4CD91CF3E711 /* Assets.xcassets */; };
 		19300751559A2A6FAEB47FB0 /* AutoscrollCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C57407801712A9C898F3553B /* AutoscrollCore.swift */; };
 		5663913C070F2CBC7312EE64 /* ScrollappApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89BA4CF96A84D88819C021A0 /* ScrollappApp.swift */; };
-		D158F60905471A35E3660CF5 /* ScrollappUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61D55CAC6CEE5EEF6A2A3C54 /* ScrollappUITests.swift */; };
+		717EE76C2B752CFE9A395629 /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = 0C13C52865E19F4A27E4D095 /* README.md */; };
+		A9E5825A3F3FD088EC99F112 /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = DDCA6F20F15F3FB698687E99 /* README.md */; };
 		F85883745EE5A343346BC6CC /* AutoscrollCoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D048CB4BA4692926CC900AA /* AutoscrollCoreTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		94DAC68DE2BFAF9C2F6D3850 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = D6F15B539067B9F8F9F15C26 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 85586DF919B0751E31871077;
-			remoteInfo = Scrollapp;
-		};
 		B197DDB212A46973D2D11096 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = D6F15B539067B9F8F9F15C26 /* Project object */;
@@ -32,12 +26,12 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		0C13C52865E19F4A27E4D095 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		0D048CB4BA4692926CC900AA /* AutoscrollCoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoscrollCoreTests.swift; sourceTree = "<group>"; };
-		61D55CAC6CEE5EEF6A2A3C54 /* ScrollappUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollappUITests.swift; sourceTree = "<group>"; };
 		89BA4CF96A84D88819C021A0 /* ScrollappApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollappApp.swift; sourceTree = "<group>"; };
 		AB28BC9482BDAB162FE158F1 /* Scrollapp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Scrollapp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C57407801712A9C898F3553B /* AutoscrollCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoscrollCore.swift; sourceTree = "<group>"; };
-		D0CA227061370B62FEA3411A /* ScrollappUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ScrollappUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		DDCA6F20F15F3FB698687E99 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		E93A902326D04E405D52310C /* ScrollappTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ScrollappTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		EBC9151011FC4CD91CF3E711 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -47,16 +41,9 @@
 			isa = PBXGroup;
 			children = (
 				0D048CB4BA4692926CC900AA /* AutoscrollCoreTests.swift */,
+				DDCA6F20F15F3FB698687E99 /* README.md */,
 			);
 			path = ScrollappTests;
-			sourceTree = "<group>";
-		};
-		4D734443F803030E77E4AF49 /* ScrollappUITests */ = {
-			isa = PBXGroup;
-			children = (
-				61D55CAC6CEE5EEF6A2A3C54 /* ScrollappUITests.swift */,
-			);
-			path = ScrollappUITests;
 			sourceTree = "<group>";
 		};
 		6680BB6C81D8A5070A1C0D47 /* Scrollapp */ = {
@@ -64,6 +51,7 @@
 			children = (
 				EBC9151011FC4CD91CF3E711 /* Assets.xcassets */,
 				C57407801712A9C898F3553B /* AutoscrollCore.swift */,
+				0C13C52865E19F4A27E4D095 /* README.md */,
 				89BA4CF96A84D88819C021A0 /* ScrollappApp.swift */,
 			);
 			path = Scrollapp;
@@ -74,7 +62,6 @@
 			children = (
 				AB28BC9482BDAB162FE158F1 /* Scrollapp.app */,
 				E93A902326D04E405D52310C /* ScrollappTests.xctest */,
-				D0CA227061370B62FEA3411A /* ScrollappUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -84,7 +71,6 @@
 			children = (
 				6680BB6C81D8A5070A1C0D47 /* Scrollapp */,
 				367422C426AA27C4C5212F17 /* ScrollappTests */,
-				4D734443F803030E77E4AF49 /* ScrollappUITests */,
 				DDFE81932E2764B8E2FF16FF /* Products */,
 			);
 			sourceTree = "<group>";
@@ -92,25 +78,6 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		221FD5C8750BA8D91031A12B /* ScrollappUITests */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = AD03B76AB544EC92724D8FC4 /* Build configuration list for PBXNativeTarget "ScrollappUITests" */;
-			buildPhases = (
-				456210748BF65B6B4857D2EE /* Sources */,
-				3524461BECFFDB9E163FC659 /* Strip Extended Attributes */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-				EC2326C1DD71C2FE57B49992 /* PBXTargetDependency */,
-			);
-			name = ScrollappUITests;
-			packageProductDependencies = (
-			);
-			productName = ScrollappUITests;
-			productReference = D0CA227061370B62FEA3411A /* ScrollappUITests.xctest */;
-			productType = "com.apple.product-type.bundle.ui-testing";
-		};
 		85586DF919B0751E31871077 /* Scrollapp */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = B31F6B279729D22F713F0D1C /* Build configuration list for PBXNativeTarget "Scrollapp" */;
@@ -135,6 +102,7 @@
 			buildConfigurationList = 4EC790A0C4D927B3B61F946D /* Build configuration list for PBXNativeTarget "ScrollappTests" */;
 			buildPhases = (
 				A6DE713C12C0A62B4C612F36 /* Sources */,
+				AE6810631542F8E97AF5B269 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -157,11 +125,6 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1600;
 				TargetAttributes = {
-					221FD5C8750BA8D91031A12B = {
-						DevelopmentTeam = H9M8KNW35G;
-						ProvisioningStyle = Automatic;
-						TestTargetID = 85586DF919B0751E31871077;
-					};
 					85586DF919B0751E31871077 = {
 						DevelopmentTeam = H9M8KNW35G;
 						ProvisioningStyle = Automatic;
@@ -188,7 +151,6 @@
 			targets = (
 				85586DF919B0751E31871077 /* Scrollapp */,
 				DCD3955358158F051235D54B /* ScrollappTests */,
-				221FD5C8750BA8D91031A12B /* ScrollappUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -199,30 +161,21 @@
 			buildActionMask = 2147483647;
 			files = (
 				0F665165958EE80265FD0430 /* Assets.xcassets in Resources */,
+				717EE76C2B752CFE9A395629 /* README.md in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AE6810631542F8E97AF5B269 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A9E5825A3F3FD088EC99F112 /* README.md in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		3524461BECFFDB9E163FC659 /* Strip Extended Attributes */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-			);
-			name = "Strip Extended Attributes";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "if [ -n \"${CODESIGNING_FOLDER_PATH:-}\" ] && [ -e \"$CODESIGNING_FOLDER_PATH\" ]; then\n  /usr/bin/xattr -cr \"$CODESIGNING_FOLDER_PATH\" || true\nfi\n";
-		};
 		5413F62ED41E9B1EDD9E2EF2 /* Strip Extended Attributes */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
@@ -244,14 +197,6 @@
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		456210748BF65B6B4857D2EE /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				D158F60905471A35E3660CF5 /* ScrollappUITests.swift in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 		7CA08D05722DF1BAB469DB6F /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -277,32 +222,9 @@
 			target = 85586DF919B0751E31871077 /* Scrollapp */;
 			targetProxy = B197DDB212A46973D2D11096 /* PBXContainerItemProxy */;
 		};
-		EC2326C1DD71C2FE57B49992 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 85586DF919B0751E31871077 /* Scrollapp */;
-			targetProxy = 94DAC68DE2BFAF9C2F6D3850 /* PBXContainerItemProxy */;
-		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
-		0A31A6E7B84AAFE68875735A /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				BUNDLE_LOADER = "";
-				COMBINE_HIDPI_IMAGES = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@loader_path/Frameworks",
-				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.fromis9.scrollappUITests;
-				PRODUCT_NAME = ScrollappUITests;
-				SDKROOT = macosx;
-				TEST_TARGET_NAME = Scrollapp;
-			};
-			name = Release;
-		};
 		2625A38D11F6AF95E388F4A7 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -504,24 +426,6 @@
 			};
 			name = Debug;
 		};
-		E6E8894E0DC29F96D91C225C /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				BUNDLE_LOADER = "";
-				COMBINE_HIDPI_IMAGES = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@loader_path/Frameworks",
-				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.fromis9.scrollappUITests;
-				PRODUCT_NAME = ScrollappUITests;
-				SDKROOT = macosx;
-				TEST_TARGET_NAME = Scrollapp;
-			};
-			name = Debug;
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -539,15 +443,6 @@
 			buildConfigurations = (
 				472E35EAEC5D81C2E557C735 /* Debug */,
 				4CC0E2EB21AE784B813A0619 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Debug;
-		};
-		AD03B76AB544EC92724D8FC4 /* Build configuration list for PBXNativeTarget "ScrollappUITests" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				E6E8894E0DC29F96D91C225C /* Debug */,
-				0A31A6E7B84AAFE68875735A /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

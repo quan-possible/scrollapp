@@ -53,27 +53,6 @@ targets:
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Scrollapp.app/Contents/MacOS/Scrollapp"
         BUNDLE_LOADER: "$(TEST_HOST)"
 
-  ScrollappUITests:
-    type: bundle.ui-testing
-    platform: macOS
-    sources:
-      - path: ScrollappUITests
-    postBuildScripts:
-      - name: Strip Extended Attributes
-        script: |
-          if [ -n "${CODESIGNING_FOLDER_PATH:-}" ] && [ -e "$CODESIGNING_FOLDER_PATH" ]; then
-            /usr/bin/xattr -cr "$CODESIGNING_FOLDER_PATH" || true
-          fi
-    dependencies:
-      - target: Scrollapp
-    settings:
-      base:
-        PRODUCT_NAME: ScrollappUITests
-        PRODUCT_BUNDLE_IDENTIFIER: com.fromis9.scrollappUITests
-        GENERATE_INFOPLIST_FILE: YES
-        TEST_TARGET_NAME: Scrollapp
-        BUNDLE_LOADER: ""
-
 schemes:
   Scrollapp:
     build:
@@ -84,12 +63,3 @@ schemes:
       gatherCoverageData: false
       targets:
         - name: ScrollappTests
-  ScrollappUITests:
-    build:
-      targets:
-        Scrollapp: all
-        ScrollappUITests: [test]
-    test:
-      gatherCoverageData: false
-      targets:
-        - name: ScrollappUITests

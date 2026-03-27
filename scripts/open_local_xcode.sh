@@ -51,13 +51,11 @@ prepare_local_wrapper() {
   rm -rf \
     "$LOCAL_ROOT/Scrollapp" \
     "$LOCAL_ROOT/ScrollappTests" \
-    "$LOCAL_ROOT/ScrollappUITests" \
     "$LOCAL_PROJECT" \
     "$LOCAL_ROOT/project.yml"
 
   ln -s "$REPO_ROOT/Scrollapp" "$LOCAL_ROOT/Scrollapp"
   ln -s "$REPO_ROOT/ScrollappTests" "$LOCAL_ROOT/ScrollappTests"
-  ln -s "$REPO_ROOT/ScrollappUITests" "$LOCAL_ROOT/ScrollappUITests"
 
   if command -v xcodegen >/dev/null 2>&1; then
     cp "$REPO_ROOT/project.yml" "$LOCAL_ROOT/project.yml"

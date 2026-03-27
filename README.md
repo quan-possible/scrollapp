@@ -15,11 +15,10 @@ Use these folder guides when you need a fast entry point into the codebase:
 
 ## Features
 
-- **Auto-scrolling**: Activate with configurable mouse/key combinations, move cursor to control scrolling
-- **7 Activation Methods**: Choose from middle-click, modified clicks, side buttons, or double-click
-- **Trackpad Support**: Option+Scroll activation for trackpad users
-- **Adjustable Sensitivity**: Slider control from 0.2x to 3.0x speed with exponential slow-speed scaling
-- **Intuitive Controls**: Move cursor up/down to control scroll direction and speed
+- **Middle-click autoscroll**: Activate on middle-click release, then move the cursor to control scrolling speed and direction
+- **Adjustable Sensitivity**: Slider control from 0.2x to 3.0x speed with exponential low-speed scaling
+- **Smooth near-center control**: Small pointer movement ramps in gradually so autoscroll stays controllable near the anchor
+- **Better same-window continuity**: Scrolling stays active anywhere inside the same window instead of dropping out when the pointer crosses into another panel or nested element
 - **Customizable Direction**: Option to invert scrolling direction based on preference
 - **Launch at Login**: Optional automatic startup
 - **Menu Bar Integration**: Quick access via status menu in the menu bar
@@ -42,21 +41,13 @@ Use these folder guides when you need a fast entry point into the codebase:
 
 ### Activating Auto-scroll
 
-**With Mouse (Configurable):**
-Choose your preferred activation method from the menu bar:
-- **Middle Click** (default)
-- **Shift + Middle Click**
-- **Cmd + Middle Click** 
-- **Option + Middle Click**
-- **Mouse Button 4** (side button)
-- **Mouse Button 5** (side button)
-- **Double Middle Click**
+**With Mouse:**
+- Middle-click once over plain scrollable content
+- The button press arms autoscroll, and releasing that same click latches it on
+- Click again with the middle button to stop, or click another mouse button to exit
 
-Use your chosen method to toggle auto-scroll on/off, or click any other mouse button to exit.
-
-**With Trackpad:**
-- Hold Option key and perform a two-finger scroll to activate auto-scroll
-- Click anywhere to exit auto-scroll mode
+Middle click toggles on click release: pressing the button arms autoscroll, and releasing the same click latches it on without reintroducing a separate hold mode.
+Regular wheel events do not cancel an already active autoscroll session.
 
 ### Controlling Scrolling
 
@@ -64,6 +55,7 @@ Once auto-scroll is activated:
 - Move cursor **up** to scroll **up**
 - Move cursor **down** to scroll **down**
 - Move further from the center point for faster scrolling
+- Speed ramps up gradually as the pointer moves farther from the anchor
 - Move closer to the center point for slower, more precise scrolling
 
 ### Customization
@@ -73,30 +65,24 @@ Once auto-scroll is activated:
 - Speeds below 1.0x use exponential scaling for fine control
 - Real-time adjustment with immediate feedback
 
-**Activation Method:**
-- Choose from 7 different mouse/key combinations
-- Avoid conflicts with browser middle-click link opening
-- Supports modifier keys (Shift, Cmd, Option) and side buttons
-
 ### Menu Options
 
 Access additional options from the menu bar icon:
-- **Start/Stop Auto-Scroll** - Manual toggle
 - **Scroll Speed** - Sensitivity slider (0.2x - 3.0x)
-- **Activation Method** - Choose your preferred mouse/key combination
 - **Invert Scrolling Direction** - Reverse up/down behavior
 - **Launch at Login** - Automatic startup option
+- **Runtime Diagnostics** - Permission and delivery status for debugging
 - **About Scrollapp** - App information and usage tips
 
 ## System Requirements
 
-- macOS 11.0 (Big Sur) or later
-- Mouse with middle button, side buttons, or trackpad support
+- macOS 14.0 or later
+- Mouse with a middle button
 - Compatible with both Intel and Apple Silicon Macs
 
 ## Privacy & Security
 
-- **Permissions**: Scrollapp requires Input Monitoring permissions to detect mouse/trackpad events. It does not collect or transmit any personal data.
+- **Permissions**: Scrollapp needs Accessibility and Input Monitoring permission, and it checks whether macOS will allow synthetic scroll-event posting for delivery. It does not collect or transmit personal data.
 - **Code Signing**: The app is ad-hoc signed for free distribution. While this triggers macOS security warnings, the source code is fully open and auditable on GitHub.
 
 ## License
@@ -138,7 +124,10 @@ To build Scrollapp from source:
    ```bash
    xcodebuild -project Scrollapp.xcodeproj -scheme Scrollapp -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
    xcodebuild -project Scrollapp.xcodeproj -scheme Scrollapp -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO test
+   ./scripts/verify_launch_smoke.sh
+   ./scripts/verify_autoscroll_delivery.sh
    ```
+   This is the simplest supported local path if you do not share the checked-in signing setup.
 
 5. **Build the app in Xcode:**
 
@@ -147,11 +136,10 @@ To build Scrollapp from source:
    - Click **Distribute App** → **Copy App**
    - Choose a location to export the built app
 
-   **Option B: Without Developer Account (Free)**
-   - In Xcode, select **Product** → **Build** (⌘+B)
-   - Navigate to the build folder: **Product** → **Show Build Folder in Finder**
-   - Find your app in `Build/Products/Release/Scrollapp.app`
-   - Copy the app to your Applications folder or wherever you'd like
+   **Option B: Local Xcode build with your own signing setup**
+   - The checked-in project uses automatic signing with a specific development team and entitlements
+   - If that team is not available in your Xcode account, switch signing to your own team before using the GUI build/archive flow
+   - If you only need a local build or test run, prefer the command-line path above with signing disabled
 
 The project is configured to build universal binaries that work on both Intel and Apple Silicon Macs.
 

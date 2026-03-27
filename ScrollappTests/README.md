@@ -4,8 +4,7 @@ This folder holds focused regression tests for the pure autoscroll logic.
 
 ## Read This First
 
-- `AutoscrollCoreTests.swift`: behavior tests for `AutoscrollCore.swift`, especially target classification and fallback-axis decisions.
-  - It also carries the lightweight AppKit delivery checks that verify observable scroll offset changes without moving the OS cursor.
+- `AutoscrollCoreTests.swift`: behavior tests for `AutoscrollCore.swift`, especially target classification, fallback-axis decisions, activation toggling, and lightweight delivery checks against a real `NSScrollView`.
 
 ## Key Rules
 
@@ -13,7 +12,7 @@ This folder holds focused regression tests for the pure autoscroll logic.
 - Keep global input-hook and AppKit integration checks out of this folder unless the behavior can be isolated safely.
 - Add or update tests here whenever `AutoscrollCore.swift` changes behavior, thresholds, or target-resolution rules.
 - When runtime delivery regresses, prefer observable-output harnesses such as the `NSScrollView` checks here over diagnostics-only assertions.
-- For owner-latching behavior, cover both pause/no-emission on mismatch and resume when the pointer returns to the latched owner.
+- For latch behavior, cover both same-window continuity across different elements or panels and pause/no-emission on real cross-window mismatch.
 - Prefer app-layer no-cursor checks that prime `AppDelegate` state and drive `performScroll()` before falling back to lower-level `deliverScrollEvent(...)` coverage.
 - Treat these tests as supporting evidence for core logic, not as the only final proof for runtime behavior changes.
 - The AppKit harness here is the strongest no-cursor lane inside the test host.

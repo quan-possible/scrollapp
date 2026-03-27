@@ -59,9 +59,9 @@ mkdir -p "${DMG_DIR}"
 echo "Copying app to DMG..."
 cp -R "$APP_PATH" "${DMG_DIR}/"
 
-# Re-sign with ad-hoc signature to remove personal info
+# Re-sign with an ad-hoc signature while preserving the app's canonical identifier
 echo "Re-signing with ad-hoc signature..."
-codesign --force --deep --sign - --timestamp=none --identifier "com.scrollapp.Scrollapp" "${DMG_DIR}/Scrollapp.app" 2>/dev/null || echo "Code signing failed - continuing anyway"
+codesign --force --deep --sign - --timestamp=none "${DMG_DIR}/Scrollapp.app" 2>/dev/null || echo "Code signing failed - continuing anyway"
 
 # Create Applications symlink
 ln -s /Applications "${DMG_DIR}/Applications"

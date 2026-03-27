@@ -13,6 +13,11 @@ RUNTIME_DIR=$(mktemp -d /private/tmp/scrollapp-external-no-cursor.XXXXXX)
 SCROLLAPP_STATUS_FILE="$RUNTIME_DIR/scrollapp-status.json"
 FIXTURE_STATE_FILE="$RUNTIME_DIR/fixture-state.json"
 FIXTURE_LOG="$RUNTIME_DIR/fixture.log"
+PROJECT_PATH="$REPO_ROOT/Scrollapp.xcodeproj"
+
+if [[ "$REPO_ROOT" == *"/Library/CloudStorage/"* || "$REPO_ROOT" == *"/GoogleDrive-"* ]]; then
+  PROJECT_PATH=$(SCROLLAPP_XCODE_LOCAL_DIR=/private/tmp/scrollapp-xcode "$REPO_ROOT/scripts/open_local_xcode.sh" --check --no-open | tail -n 1)
+fi
 
 cleanup() {
   if [[ -n "${SCROLLAPP_PID:-}" ]] && kill -0 "$SCROLLAPP_PID" 2>/dev/null; then
@@ -91,6 +96,59 @@ raise SystemExit(1)
 PY
 }
 
+wait_for_meaningful_offset_delta() {
+  local file_path="$1"
+  local field_name="$2"
+  local initial_value="$3"
+  local minimum_delta="$4"
+
+  /usr/bin/python3 - "$file_path" "$field_name" "$initial_value" "$minimum_delta" <<'PY'
+import json
+import pathlib
+import sys
+import time
+
+path = pathlib.Path(sys.argv[1])
+field_name = sys.argv[2]
+initial_value = float(sys.argv[3])
+minimum_delta = float(sys.argv[4])
+deadline = time.time() + 15
+
+while time.time() < deadline:
+    if path.exists():
+        try:
+            payload = json.loads(path.read_text())
+        except Exception:
+            time.sleep(0.05)
+            continue
+
+        current_value = payload.get(field_name)
+        if current_value is None:
+            time.sleep(0.05)
+            continue
+        delta = abs(float(current_value) - initial_value)
+        if delta >= minimum_delta:
+            print(current_value)
+            raise SystemExit(0)
+    time.sleep(0.05)
+
+raise SystemExit(1)
+PY
+}
+
+offset_delta() {
+  local initial_value="$1"
+  local current_value="$2"
+
+  /usr/bin/python3 - "$initial_value" "$current_value" <<'PY'
+import sys
+
+initial_value = float(sys.argv[1])
+current_value = float(sys.argv[2])
+print(current_value - initial_value)
+PY
+}
+
 json_value() {
   local file_path="$1"
   local field_name="$2"
@@ -127,7 +185,7 @@ cd "$REPO_ROOT"
 
 echo "Building Scrollapp for external no-cursor verification..."
 xcodebuild build \
-  -project Scrollapp.xcodeproj \
+  -project "$PROJECT_PATH" \
   -scheme Scrollapp \
   -destination 'platform=macOS' \
   -derivedDataPath "$DERIVED_DATA_PATH" >/dev/null
@@ -190,11 +248,13 @@ send_command set_pointer 2 \
   "deliveryX=$target_x" \
   "deliveryY=$upward_delivery_y"
 
-echo "Driving the real app-layer scroll path against the external fixture..."
-send_command perform_scroll 3 "count=8"
-/bin/sleep 0.3
+echo "Waiting for the real timer-driven autoscroll path against the external fixture..."
+wait_for_meaningful_offset_delta "$FIXTURE_STATE_FILE" currentVerticalOffset "$initial_offset" "40" >/dev/null
+
+send_command snapshot 3
 
 current_offset=$(json_value "$FIXTURE_STATE_FILE" currentVerticalOffset)
+offset_change=$(offset_delta "$initial_offset" "$current_offset")
 delivery_status=$(json_value "$SCROLLAPP_STATUS_FILE" scrollDelivery)
 emission_status=$(json_value "$SCROLLAPP_STATUS_FILE" scrollEmission)
 
@@ -206,8 +266,26 @@ if [[ "$current_offset" == "$initial_offset" ]]; then
   exit 1
 fi
 
+if ! /usr/bin/python3 - "$offset_change" <<'PY'
+import sys
+
+offset_change = abs(float(sys.argv[1]))
+raise SystemExit(0 if offset_change >= 40 else 1)
+PY
+then
+  echo "External fixture moved too little to trust the verification result." >&2
+  echo "Initial vertical offset: $initial_offset" >&2
+  echo "Current vertical offset: $current_offset" >&2
+  echo "Offset delta: $offset_change" >&2
+  echo "Scroll delivery: $delivery_status" >&2
+  echo "Scroll emission: $emission_status" >&2
+  echo "Fixture log: $FIXTURE_LOG" >&2
+  exit 1
+fi
+
 echo "External no-cursor verification passed."
 echo "Initial vertical offset: $initial_offset"
 echo "Current vertical offset: $current_offset"
+echo "Offset delta: $offset_change"
 echo "Scroll delivery: $delivery_status"
 echo "Scroll emission: $emission_status"

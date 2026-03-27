@@ -1,13 +1,6 @@
 import CoreGraphics
 import Foundation
 
-enum AutoscrollMode: Equatable {
-    case inactive
-    case initial
-    case holding
-    case toggled
-}
-
 struct AutoscrollAxes: Equatable {
     var horizontal: Bool
     var vertical: Bool
@@ -30,24 +23,18 @@ struct AutoscrollVelocity: Equatable {
 struct AutoscrollPhysics {
     static let `default` = AutoscrollPhysics()
 
-    var deadZone: CGFloat = 15.0
-    var horizontalScale: CGFloat = 74.0
-    var verticalScale: CGFloat = 68.0
-    var minimumStep: CGFloat = 3.6
-    var launchBoost: CGFloat = 9.5
-    var cruiseStep: CGFloat = 38.0
-    var overflowGain: CGFloat = 14.0
-    var maxStep: CGFloat = 72.0
+    var deadZone: CGFloat = 5.0
+    var horizontalScale: CGFloat = 50.0
+    var verticalScale: CGFloat = 50.0
+    var curveExponent: CGFloat = 2.2
+    var quadraticGainPerSecond: CGFloat = 250.0
+    var maxSpeedPerSecond: CGFloat = 9000.0
 
     func effectiveSensitivity(from configuredValue: Double) -> CGFloat {
         if configuredValue < 1.0 {
             return CGFloat(pow(configuredValue, 1.5))
         }
         return CGFloat(configuredValue)
-    }
-
-    func exceededDeadZone(_ pointerOffset: CGSize) -> Bool {
-        abs(pointerOffset.width) > deadZone || abs(pointerOffset.height) > deadZone
     }
 
     func velocity(
@@ -63,7 +50,7 @@ struct AutoscrollPhysics {
                 delta: pointerOffset.width,
                 scale: horizontalScale,
                 adjustedSensitivity: adjustedSensitivity,
-                invertDirection: !invertVertical
+                invertDirection: invertVertical
             )
             : 0
 
@@ -88,52 +75,22 @@ struct AutoscrollPhysics {
         let distance = max(0, abs(delta) - deadZone)
         guard distance > 0 else { return 0 }
 
-        let normalizedDistance = min(distance / scale, 1.0)
-        let launchDistance = max(scale * 0.2, 1)
-        let launchBlend = min(distance / launchDistance, 1.0)
-        let earlyResponse = easeOutQuart(launchBlend)
-        let cruiseResponse = easeOutCubic(normalizedDistance)
+        let normalizedDistance = distance / max(scale, 1)
+        let magnitude = min(pow(normalizedDistance, curveExponent) * quadraticGainPerSecond, maxSpeedPerSecond)
 
-        var magnitude = minimumStep
-        magnitude += launchBoost * earlyResponse
-        magnitude += max(0, cruiseStep - minimumStep - launchBoost) * cruiseResponse
-
-        let overflowDistance = max(0, distance - scale)
-        if overflowDistance > 0 {
-            magnitude += pow(overflowDistance / scale, 1.05) * overflowGain
-        }
-
-        var signedVelocity = min(magnitude, maxStep) * adjustedSensitivity
+        var signedVelocity = min(magnitude, maxSpeedPerSecond) * adjustedSensitivity
         signedVelocity *= delta > 0 ? 1 : -1
         if invertDirection {
             signedVelocity *= -1
         }
 
-        let threshold = min(0.1, adjustedSensitivity * 0.5)
+        let threshold = min(10.0, adjustedSensitivity * 25.0)
         return abs(signedVelocity) < threshold ? 0 : signedVelocity
     }
-
-    private func easeOutCubic(_ value: CGFloat) -> CGFloat {
-        let clamped = min(max(value, 0), 1)
-        let inverse = 1 - clamped
-        return 1 - (inverse * inverse * inverse)
-    }
-
-    private func easeOutQuart(_ value: CGFloat) -> CGFloat {
-        let clamped = min(max(value, 0), 1)
-        let inverse = 1 - clamped
-        return 1 - (inverse * inverse * inverse * inverse)
-    }
-}
-
-enum AutoscrollTargetBehavior: Equatable {
-    case startAutoscroll
-    case passThrough
-    case undetermined
 }
 
 struct AutoscrollTargetResolution: Equatable {
-    var behavior: AutoscrollTargetBehavior
+    var shouldStart: Bool
     var fallbackAxes: AutoscrollAxes
 }
 
@@ -172,14 +129,6 @@ enum AutoscrollTargetClassifier {
         "AXZoomButton"
     ]
 
-    static let strongScrollableRoles: Set<String> = [
-        "AXBrowser",
-        "AXList",
-        "AXOutline",
-        "AXTable",
-        "AXTextArea"
-    ]
-
     static let compactTextInputRoles: Set<String> = [
         "AXTextField"
     ]
@@ -208,31 +157,23 @@ enum AutoscrollTargetClassifier {
 
     static func classify(_ snapshot: AutoscrollTargetSnapshot) -> AutoscrollTargetResolution {
         if isCompactTextInputControl(snapshot) {
-            return AutoscrollTargetResolution(behavior: .passThrough, fallbackAxes: .none)
+            return AutoscrollTargetResolution(shouldStart: false, fallbackAxes: .none)
         }
 
         if isDirectlyActionable(snapshot) {
-            return AutoscrollTargetResolution(behavior: .passThrough, fallbackAxes: .none)
+            return AutoscrollTargetResolution(shouldStart: false, fallbackAxes: .none)
         }
 
         if hasNearInteractiveAncestor(snapshot) {
-            return AutoscrollTargetResolution(behavior: .passThrough, fallbackAxes: .none)
+            return AutoscrollTargetResolution(shouldStart: false, fallbackAxes: .none)
         }
 
         if hasDirectGenericAction(snapshot) {
-            return AutoscrollTargetResolution(behavior: .passThrough, fallbackAxes: .none)
+            return AutoscrollTargetResolution(shouldStart: false, fallbackAxes: .none)
         }
 
         let fallbackAxes = inferredFallbackAxes(for: snapshot)
-        return AutoscrollTargetResolution(behavior: .startAutoscroll, fallbackAxes: fallbackAxes)
-    }
-
-    static func behavior(for snapshot: AutoscrollTargetSnapshot) -> AutoscrollTargetBehavior {
-        classify(snapshot).behavior
-    }
-
-    static func fallbackAxes(for snapshot: AutoscrollTargetSnapshot) -> AutoscrollAxes {
-        classify(snapshot).fallbackAxes
+        return AutoscrollTargetResolution(shouldStart: true, fallbackAxes: fallbackAxes)
     }
 
     private static func inferredFallbackAxes(for snapshot: AutoscrollTargetSnapshot) -> AutoscrollAxes {
@@ -328,64 +269,21 @@ enum AutoscrollTargetClassifier {
 
 struct AutoscrollSession {
     var anchorPoint: CGPoint
-    var deliveryPoint: CGPoint
-    var targetPID: pid_t?
     var targetWindowID: CGWindowID?
-    var latchedScrollOwner: AutoscrollScrollOwner?
     var canScrollHorizontally: Bool
     var canScrollVertically: Bool
     var activationButtonNumber: Int
-    var mode: AutoscrollMode = .initial
     var velocity: AutoscrollVelocity = .zero
-}
-
-struct AutoscrollScrollOwner: Equatable {
-    var role: String?
-    var subrole: String?
-    var frame: CGRect?
-}
-
-enum AutoscrollActivationDisposition {
-    case passThrough
-    case start(AutoscrollSession)
-}
-
-enum AutoscrollStopClickPolicy {
-    static func shouldSwallow(buttonNumber: Int) -> Bool {
-        buttonNumber == 0
-    }
+    var emissionCarry: AutoscrollVelocity = .zero
 }
 
 enum AutoscrollBehavior {
     private static let defaultPhysics = AutoscrollPhysics.default
-    static let activationDeadZone: CGFloat = defaultPhysics.deadZone
-
-    static func transitionedMode(
-        from mode: AutoscrollMode,
-        anchorPoint: CGPoint,
-        currentPoint: CGPoint,
-        activationButtonIsDown: Bool
-    ) -> AutoscrollMode {
-        let pointerOffset = CGSize(
-            width: currentPoint.x - anchorPoint.x,
-            height: currentPoint.y - anchorPoint.y
-        )
-        let exceededDeadZone = defaultPhysics.exceededDeadZone(pointerOffset)
-
-        switch mode {
-        case .inactive:
-            return .inactive
-        case .toggled:
-            return .toggled
-        case .holding:
-            return activationButtonIsDown ? .holding : .inactive
-        case .initial:
-            if exceededDeadZone {
-                return activationButtonIsDown ? .holding : .inactive
-            }
-            return activationButtonIsDown ? .initial : .toggled
-        }
-    }
+    static let preferredTickInterval: TimeInterval = 1.0 / 100.0
+    private static let defaultReleaseResponse: TimeInterval = 0.04
+    private static let defaultTurnResponse: TimeInterval = 0.012
+    private static let defaultAccelerationResponse: TimeInterval = 0.018
+    private static let defaultDecelerationResponse: TimeInterval = 0.03
 
     static func velocity(
         anchorPoint: CGPoint,
@@ -411,27 +309,76 @@ enum AutoscrollBehavior {
 
     static func smoothedVelocity(
         previous: AutoscrollVelocity,
-        target: AutoscrollVelocity
+        target: AutoscrollVelocity,
+        elapsedTime: TimeInterval = preferredTickInterval
     ) -> AutoscrollVelocity {
         AutoscrollVelocity(
-            horizontal: smoothAxis(previous: previous.horizontal, target: target.horizontal),
-            vertical: smoothAxis(previous: previous.vertical, target: target.vertical)
+            horizontal: smoothAxis(previous: previous.horizontal, target: target.horizontal, elapsedTime: elapsedTime),
+            vertical: smoothAxis(previous: previous.vertical, target: target.vertical, elapsedTime: elapsedTime)
         )
     }
 
-    private static func smoothAxis(previous: CGFloat, target: CGFloat) -> CGFloat {
-        let blend: CGFloat
-        if target == 0 {
-            blend = 0.28
-        } else if previous == 0 || (previous > 0) != (target > 0) {
-            blend = 0.82
-        } else if abs(target) > abs(previous) {
-            blend = 0.7
-        } else {
-            blend = 0.4
+    static func normalizedElapsedTime(_ rawElapsedTime: TimeInterval?) -> TimeInterval {
+        guard let rawElapsedTime,
+              rawElapsedTime.isFinite,
+              rawElapsedTime > 0 else {
+            return preferredTickInterval
         }
 
+        if rawElapsedTime < preferredTickInterval * 0.5 {
+            return preferredTickInterval
+        }
+
+        return min(rawElapsedTime, 1.0 / 15.0)
+    }
+
+    static func emissionStep(
+        velocity: AutoscrollVelocity,
+        elapsedTime: TimeInterval,
+        carry: AutoscrollVelocity
+    ) -> (delta: AutoscrollVelocity, carry: AutoscrollVelocity) {
+        let horizontal = emissionAxis(
+            velocity: velocity.horizontal,
+            elapsedTime: elapsedTime,
+            carry: carry.horizontal
+        )
+        let vertical = emissionAxis(
+            velocity: velocity.vertical,
+            elapsedTime: elapsedTime,
+            carry: carry.vertical
+        )
+
+        return (
+            delta: AutoscrollVelocity(horizontal: horizontal.delta, vertical: vertical.delta),
+            carry: AutoscrollVelocity(horizontal: horizontal.carry, vertical: vertical.carry)
+        )
+    }
+
+    private static func smoothAxis(previous: CGFloat, target: CGFloat, elapsedTime: TimeInterval) -> CGFloat {
+        let responseTime: TimeInterval
+        if target == 0 {
+            responseTime = defaultReleaseResponse
+        } else if previous == 0 || (previous > 0) != (target > 0) {
+            responseTime = defaultTurnResponse
+        } else if abs(target) > abs(previous) {
+            responseTime = defaultAccelerationResponse
+        } else {
+            responseTime = defaultDecelerationResponse
+        }
+
+        let clampedElapsedTime = normalizedElapsedTime(elapsedTime)
+        let blend = CGFloat(1 - Foundation.exp(-clampedElapsedTime / responseTime))
         let value = previous + ((target - previous) * blend)
         return abs(value) < 0.35 ? 0 : value
+    }
+
+    private static func emissionAxis(
+        velocity: CGFloat,
+        elapsedTime: TimeInterval,
+        carry: CGFloat
+    ) -> (delta: CGFloat, carry: CGFloat) {
+        let exactDelta = (velocity * CGFloat(elapsedTime)) + carry
+        let roundedDelta = exactDelta.rounded()
+        return (delta: roundedDelta, carry: exactDelta - roundedDelta)
     }
 }
