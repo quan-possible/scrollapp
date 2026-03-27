@@ -1,10 +1,10 @@
 # Project Memory
 
-Last updated: 2026-03-22
+Last updated: 2026-03-27
 
 ## Current Objective
-- Restore reliable Windows-style middle-click autoscroll on macOS with the smallest generalizable implementation.
-- Keep runtime behavior simple enough that activation and delivery can be debugged from live evidence instead of stacked heuristics.
+- Keep the simplified autoscroll runtime while preserving the pre-simplification feel in real use.
+- Require future simplification passes to prove behavior parity before sign-off.
 
 ## Current State
 - `Scrollapp/AutoscrollCore.swift` is the main pure-logic layer for autoscroll physics and target classification.
@@ -15,33 +15,32 @@ Last updated: 2026-03-22
   - `ScrollappTests/README.md`
   - `scripts/README.md`
 - The project is now enrolled in the `codex-personal` and `codex-manager` portfolios under the registry id `scrollapp`, so manager-level status and follow-up work should load this repo directly instead of treating it as out-of-band app work.
-- The simplification pass removed dead UI/test surface:
-  - `Scrollapp/ContentView.swift`
-  - `ScrollappTests/ScrollappTests.swift`
-  - `ScrollappUITests/ScrollappUITestsLaunchTests.swift`
-- The current runtime is back on the smallest delivery path:
-  - synthetic wheel events post through `.cgSessionEventTap`
-  - no forced anchored event-location override
-  - diagnostics report live-pointer delivery again
-- Focused verification is green:
-  - `xcodebuild test -project Scrollapp.xcodeproj -scheme Scrollapp -destination 'platform=macOS' -only-testing:ScrollappTests/AutoscrollCoreTests`
-    - `19` tests passed
-  - `xcodebuild build -project Scrollapp.xcodeproj -scheme Scrollapp -destination 'platform=macOS'`
-    - passed
-  - refreshed `/Applications/Scrollapp.app` from the verified build on 2026-03-14 03:29 MDT
+- The March 27 simplification pass removed dead runtime and test/UI surface while keeping the app on the session-tap delivery path.
+- The runtime feel regression from that pass was repaired:
+  - the live app is back on the rate-based `1.0 / 100.0` emission model
+  - the curve ceiling was raised to `maxSpeedPerSecond = 9000.0`
+  - the top-end now matches the user's expected feel much more closely than the simplified regression build
+- Direct verification lanes now include:
+  - `./scripts/verify_autoscroll_delivery.sh`
+  - `./scripts/verify_launch_smoke.sh`
+  - `./scripts/verify_autoscroll_external_no_cursor.sh`
+- `ScrollappUITests` and its Xcode scheme were removed; launch smoke now lives in `scripts/verify_launch_smoke.sh`.
+- The `simplify` skill was updated outside this repo to require:
+  - pre-edit behavior baselines
+  - rollback-safe checkpoints
+  - explicit old-vs-new parity gating before simplification sign-off
 
 ## Known Gaps
-- Runtime behavior is still unstable in real browser usage even though focused tests pass.
-- A clean solution for "keep scrolling after the cursor leaves the clicked element" is still unresolved.
-- Prior attempts to force target-latched delivery caused two distinct regressions:
-  - `postToPid(...)` led to visible activation without real scrolling
-  - anchored event-location override reintroduced cursor-pull behavior
-- Browser automation is not reliable proof for the global event-tap path, so live runtime debugging still needs app-side instrumentation or manual validation.
+- The app feel is now user-guided rather than numerically identical to a frozen historical baseline, so future tuning work should capture explicit before/after evidence first.
+- Browser automation is still not complete proof for the global event-tap path; direct app-path verification remains necessary for behavior-sensitive changes.
+- The global `simplify` skill changes live under `~/.codex` and were not part of the Scrollapp Git push.
 
 ## Current Guidance
 - Prefer structural classification rules over metadata-heavy heuristics.
 - Do not reintroduce cursor anchoring, pointer snapping, or broad URL-based link inference without fresh runtime evidence.
-- If the next pass continues to fail in live usage, instrument the delivery/classification path rather than adding more heuristics.
+- If the next pass drifts in live usage, instrument the delivery/classification path rather than adding more heuristics.
+- Before future simplification work, capture the old behavior on the same user-visible surface that will be used for sign-off.
+- For live autoscroll tuning, verify against the installed app path and keep the external no-cursor script in the loop.
 - Follow the repo `software-development` contract for substantive coding work:
   - read the nearest README chain before deep file exploration
   - update the relevant folder `README.md` when structure, commands, tests, or invariants change
