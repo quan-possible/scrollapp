@@ -1,6 +1,6 @@
 # Project Memory
 
-Last updated: 2026-03-27
+Last updated: 2026-04-03
 
 ## Current Objective
 - Keep the simplified autoscroll runtime while preserving the pre-simplification feel in real use.
@@ -20,15 +20,12 @@ Last updated: 2026-03-27
   - the live app is back on the rate-based `1.0 / 100.0` emission model
   - the curve ceiling was raised to `maxSpeedPerSecond = 9000.0`
   - the top-end now matches the user's expected feel much more closely than the simplified regression build
-- Direct verification lanes now include:
+- Direct verification now uses three main lanes:
   - `./scripts/verify_autoscroll_delivery.sh`
   - `./scripts/verify_launch_smoke.sh`
   - `./scripts/verify_autoscroll_external_no_cursor.sh`
 - `ScrollappUITests` and its Xcode scheme were removed; launch smoke now lives in `scripts/verify_launch_smoke.sh`.
-- The `simplify` skill was updated outside this repo to require:
-  - pre-edit behavior baselines
-  - rollback-safe checkpoints
-  - explicit old-vs-new parity gating before simplification sign-off
+- The `simplify` skill outside this repo now requires pre-edit baselines, rollback-safe checkpoints, and explicit old-vs-new parity before simplification sign-off.
 
 ## Known Gaps
 - The app feel is now user-guided rather than numerically identical to a frozen historical baseline, so future tuning work should capture explicit before/after evidence first.
@@ -38,7 +35,7 @@ Last updated: 2026-03-27
 ## Current Guidance
 - Prefer structural classification rules over metadata-heavy heuristics.
 - Do not reintroduce cursor anchoring, pointer snapping, or broad URL-based link inference without fresh runtime evidence.
-- If the next pass drifts in live usage, instrument the delivery/classification path rather than adding more heuristics.
+- If live behavior drifts, instrument the delivery/classification path rather than adding more heuristics.
 - Before future simplification work, capture the old behavior on the same user-visible surface that will be used for sign-off.
 - For live autoscroll tuning, verify against the installed app path and keep the external no-cursor script in the loop.
 - Follow the repo `software-development` contract for substantive coding work:
